@@ -22,7 +22,7 @@ services:
     - --secretkey=minioadmin
     - --inbox=bucket.write
     - --archive=bucket.read
-    - --trace=true
+    #- --trace=true
     mem_limit: 20000000
 
   sut:
@@ -31,7 +31,7 @@ services:
     - app0
     build: ./tests
     environment:
-    - DEBUG=true
+    #- DEBUG=true
     - MINIO_ACCESS_KEY=minioadmin
     - MINIO_SECRET_KEY=minioadmin
     entrypoint:
