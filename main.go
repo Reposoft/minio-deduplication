@@ -91,7 +91,7 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 	sha256hex := fmt.Sprintf("%x", hasher.Sum(nil))
 	logger.Debug("SHA256", zap.String("hex", sha256hex))
 	write := fmt.Sprintf("%s/%s%s", archive, sha256hex, blob.Ext)
-	logger.Info("TODO transfer",
+	logger.Info("Transferring",
 		zap.String("key", blob.Key),
 		zap.String("write", write),
 	)
@@ -151,16 +151,25 @@ func main() {
 	assertBucketExists(archive, minioClient, logger)
 	logger.Info("Bucket existence confirmed", zap.String("inbox", inbox), zap.String("archive", archive))
 
-	// TODO list existing soure blobs and transfer immediately
+	logger.Info("Listing existing inbox objects")
+	listDoneCh := make(chan struct{})
+	defer close(listDoneCh)
+	isRecursive := true
+	objectCh := minioClient.ListObjectsV2(inbox, "", isRecursive, listDoneCh)
+	for object := range objectCh {
+		if object.Err != nil {
+			logger.Fatal("List object error", zap.Error(object.Err))
+		}
+		logger.Info("Existing inbox object to be transferred", zap.String("key", object.Key))
+		transfer(uploaded{
+			Key: object.Key,
+			Ext: filepath.Ext(object.Key),
+		}, minioClient, logger)
+	}
 
-	// Create a done channel to control 'ListenBucketNotification' go routine.
-	doneCh := make(chan struct{})
-
-	// Indicate to our routine to exit cleanly upon return.
-	defer close(doneCh)
-
-	// Listen for bucket notifications on "mybucket" filtered by prefix, suffix and events.
 	logger.Info("Starting bucket notifications listener")
+	doneCh := make(chan struct{})
+	defer close(doneCh)
 	for notificationInfo := range minioClient.ListenBucketNotification(inbox, "", "", []string{
 		"s3:ObjectCreated:*",
 	}, doneCh) {
