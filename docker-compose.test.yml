@@ -31,21 +31,10 @@ services:
     depends_on:
     - minio0
     - app0
-    image: minio/mc:RELEASE.2020-02-25T18-10-03Z
+    build: ./tests
+    environment:
+    - DEBUG=true
+    - MINIO_ACCESS_KEY=minioadmin
+    - MINIO_SECRET_KEY=minioadmin
     entrypoint:
-    - /bin/sh
-    - -cx
-    command:
-    - |
-      mc config host add minio0 http://minio0:9000
-
-      echo "Test1" > test1.txt
-      mc --no-color cp test1.txt minio0/bucket.write/
-      sleep 1
-      mc --no-color stat minio0/buckeet.read/$$(sha256sum test1.txt | cut -d' ' -f1).txt
-
-      # TODO X-Custom-Header
-
-      # TODO Content-Disposition
-
-      # TODO dir sharding option 0-3
+    - basic-flow.sh

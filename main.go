@@ -6,7 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
-	
+	"time"
+
 	"github.com/minio/minio-go/v6"
 
 	"go.uber.org/zap"
@@ -34,6 +35,20 @@ func init() {
 	flag.StringVar(&accesskey, "accesskey", "", "access key")
 	flag.StringVar(&secretkey, "secretkey", "", "secret key")
 	flag.Parse()
+}
+
+func ready(minioClient *minio.Client, logger *zap.Logger) error {
+	_, inboxErr := minioClient.GetBucketPolicy(inbox)
+	if (inboxErr != nil) {
+		logger.Warn("Inbox bucket not available", zap.String("name", inbox), zap.Error(inboxErr))
+		return inboxErr
+	}
+	_, archiveErr := minioClient.GetBucketPolicy(archive)
+	if (archiveErr != nil) {
+		logger.Warn("Archive bucket not available", zap.String("name", archive), zap.Error(archiveErr))
+		return archiveErr
+	}
+	return nil
 }
 
 func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
@@ -94,6 +109,14 @@ func main() {
 		logger.Fatal("Failed to set up minio client",
 			zap.Error(err),
 		)
+	}
+
+	for true {
+		readyErr :=  ready(minioClient, logger)
+		if readyErr == nil {
+			break
+		}
+		time.Sleep(time.Second)
 	}
 
 	// minioClient.TraceOn(os.Stderr)
