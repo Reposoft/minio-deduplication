@@ -5,10 +5,13 @@ import (
 	"crypto/sha256"
 	"flag"
 	"fmt"
+	"net/http"
+	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/minio/minio-go/v6"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"go.uber.org/zap"
 )
@@ -25,6 +28,8 @@ var (
 	secure bool
 	accesskey string
 	secretkey string
+	metrics string
+	trace bool
 )
 
 func init() {
@@ -34,6 +39,8 @@ func init() {
 	flag.BoolVar(&secure, "secure", true, "https")
 	flag.StringVar(&accesskey, "accesskey", "", "access key")
 	flag.StringVar(&secretkey, "secretkey", "", "secret key")
+	flag.StringVar(&metrics, "metrics", ":2112", "bind metrics server to")
+	flag.BoolVar(&trace, "trace", false, "Enable minio client tracing")
 	flag.Parse()
 }
 
@@ -104,6 +111,16 @@ func main() {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
+	http.Handle("/metrics", promhttp.Handler())
+	go func() {
+		logger.Info("Starting /metrics server", zap.String("bound", metrics))
+		err := http.ListenAndServe(metrics, nil)
+		if err != nil {
+			logger.Fatal("Failed to start metrics server", zap.Error(err))
+		}
+	}()
+
+	logger.Info("Initializing minio client", zap.String("host", host), zap.Bool("https", secure))
 	minioClient, err := minio.New(host, accesskey, secretkey, secure)
 	if err != nil {
 		logger.Fatal("Failed to set up minio client",
@@ -111,15 +128,11 @@ func main() {
 		)
 	}
 
-	for true {
-		readyErr :=  ready(minioClient, logger)
-		if readyErr == nil {
-			break
-		}
-		time.Sleep(time.Second)
+	if trace {
+		minioClient.TraceOn(os.Stderr)
 	}
 
-	// minioClient.TraceOn(os.Stderr)
+	ready(minioClient, logger)
 
 	// TODO list existing soure blobs and transfer immediately
 

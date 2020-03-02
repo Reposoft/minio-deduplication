@@ -22,6 +22,7 @@ services:
     - --secretkey=minioadmin
     - --inbox=bucket.write
     - --archive=bucket.read
+    - --trace=true
     mem_limit: 20000000
 
   sut:
