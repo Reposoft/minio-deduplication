@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
+
+	"github.com/cenkalti/backoff/v4"
 
 	"github.com/minio/minio-go/v6"
 
@@ -44,18 +47,30 @@ func init() {
 	flag.Parse()
 }
 
-func ready(minioClient *minio.Client, logger *zap.Logger) error {
-	_, inboxErr := minioClient.GetBucketPolicy(inbox)
-	if (inboxErr != nil) {
-		logger.Warn("Inbox bucket not available", zap.String("name", inbox), zap.Error(inboxErr))
-		return inboxErr
+func assertBucketExists(name string, minioClient *minio.Client, logger *zap.Logger) {
+	check := func() error {
+		found, err := minioClient.BucketExists(name)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("non-existent bucket: %s", name)
+		}
+		return nil
 	}
-	_, archiveErr := minioClient.GetBucketPolicy(archive)
-	if (archiveErr != nil) {
-		logger.Warn("Archive bucket not available", zap.String("name", archive), zap.Error(archiveErr))
-		return archiveErr
+	log := func(err error, t time.Duration) {
+		logger.Warn("Bucket existence check failed", zap.String("name", name), zap.Duration("t", t), zap.Error(err))
 	}
-	return nil
+	policy := backoff.NewExponentialBackOff()
+	policy.InitialInterval = time.Second / 4
+	err := backoff.RetryNotify(
+		check,
+		backoff.WithMaxRetries(policy, 10),
+		log,
+	)
+	if err != nil {
+		logger.Fatal("Failed to verify bucket existence", zap.String("name", name))
+	}
 }
 
 func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
@@ -132,7 +147,9 @@ func main() {
 		minioClient.TraceOn(os.Stderr)
 	}
 
-	ready(minioClient, logger)
+	assertBucketExists(inbox, minioClient, logger)
+	assertBucketExists(archive, minioClient, logger)
+	logger.Info("Bucket existence confirmed", zap.String("inbox", inbox), zap.String("archive", archive))
 
 	// TODO list existing soure blobs and transfer immediately
 
@@ -143,6 +160,7 @@ func main() {
 	defer close(doneCh)
 
 	// Listen for bucket notifications on "mybucket" filtered by prefix, suffix and events.
+	logger.Info("Starting bucket notifications listener")
 	for notificationInfo := range minioClient.ListenBucketNotification(inbox, "", "", []string{
 		"s3:ObjectCreated:*",
 	}, doneCh) {
