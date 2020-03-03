@@ -35,4 +35,4 @@ services:
     - MINIO_ACCESS_KEY=minioadmin
     - MINIO_SECRET_KEY=minioadmin
     entrypoint:
-    - basic-flow.sh
+    - all.sh

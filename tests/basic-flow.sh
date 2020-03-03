@@ -31,9 +31,6 @@ retrywait=0
 until mc --no-color stat "$expected"; \
   do [ $(( retrywait++ )) -lt 10 ]; sleep 1; done
 
-# TODO Content-Disposition
-# mime.FormatMediaType("attachment", map[string]string{"filename": "数据统计.png"})
-
 # TODO dir sharding option 0-3
 
 # TODO X-Custom-Header
