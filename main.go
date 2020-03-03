@@ -151,6 +151,13 @@ func main() {
 	assertBucketExists(archive, minioClient, logger)
 	logger.Info("Bucket existence confirmed", zap.String("inbox", inbox), zap.String("archive", archive))
 
+	logger.Info("Starting bucket notifications listener")
+	doneCh := make(chan struct{})
+	defer close(doneCh)
+	listenCh := minioClient.ListenBucketNotification(inbox, "", "", []string{
+		"s3:ObjectCreated:*",
+	}, doneCh)
+
 	logger.Info("Listing existing inbox objects")
 	listDoneCh := make(chan struct{})
 	defer close(listDoneCh)
@@ -167,12 +174,7 @@ func main() {
 		}, minioClient, logger)
 	}
 
-	logger.Info("Starting bucket notifications listener")
-	doneCh := make(chan struct{})
-	defer close(doneCh)
-	for notificationInfo := range minioClient.ListenBucketNotification(inbox, "", "", []string{
-		"s3:ObjectCreated:*",
-	}, doneCh) {
+	for notificationInfo := range listenCh {
 		if notificationInfo.Err != nil {
 			logger.Fatal("Notification error",
 				zap.Error(notificationInfo.Err),
