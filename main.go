@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"flag"
 	"fmt"
+	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -98,7 +100,13 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 
 	src := minio.NewSourceInfo(inbox, blob.Key, nil)
 
-	dst, err := minio.NewDestinationInfo(archive, fmt.Sprintf("%s%s", sha256hex, blob.Ext), nil, nil)
+	blobName := fmt.Sprintf("%s%s", sha256hex, blob.Ext)
+	downloadName := filepath.Base(blob.Key)
+
+	meta := make(map[string]string)
+	meta["content-disposition"] = mime.FormatMediaType("attachment", map[string]string{"filename": downloadName})
+	dst, err := minio.NewDestinationInfo(archive, blobName, nil, meta)
+
 	if err != nil {
 		logger.Error("Failed to define transfer destination",
 			zap.String("key", blob.Key),
@@ -184,7 +192,10 @@ func main() {
 			logger.Info("Notification",
 				zap.Any("record", record),
 			)
-			key := record.S3.Object.Key // Note that slashes are urlencoded
+			key, err := url.QueryUnescape(record.S3.Object.Key)
+			if err != nil {
+				logger.Fatal("Failed to urldecode notification", zap.String("key", record.S3.Object.Key))
+			}
 			transfer(uploaded{
 				Key: key,
 				Ext: filepath.Ext(key),
