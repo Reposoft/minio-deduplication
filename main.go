@@ -76,6 +76,13 @@ func assertBucketExists(name string, minioClient *minio.Client, logger *zap.Logg
 }
 
 func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
+	objectInfo, err := minioClient.StatObject(inbox, blob.Key, minio.StatObjectOptions{})
+	if err != nil {
+		logger.Fatal("Failed to stat object",
+			zap.String("key", blob.Key),
+			zap.String("bucket", inbox))
+	}
+
 	object, err := minioClient.GetObject(inbox, blob.Key, minio.GetObjectOptions{})
 	if err != nil {
 		logger.Fatal("Failed to read object",
@@ -104,6 +111,9 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 	downloadName := filepath.Base(blob.Key)
 
 	meta := make(map[string]string)
+	// TODO include cusotm metadata, objectInfo.Metadata?
+	// https://github.com/minio/minio-go/issues/1133 documents that because we add content-disposition we must explicitly add metadata
+	meta["content-type"] = objectInfo.ContentType
 	meta["content-disposition"] = mime.FormatMediaType("attachment", map[string]string{"filename": downloadName})
 	dst, err := minio.NewDestinationInfo(archive, blobName, nil, meta)
 
