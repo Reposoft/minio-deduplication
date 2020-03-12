@@ -197,6 +197,7 @@ func main() {
 			logger.Fatal("Notification error",
 				zap.Error(notificationInfo.Err),
 			)
+			// {"level":"fatal","ts":1584039019.2629213,"caller":"source/main.go:197","msg":"Notification error","error":"unexpected end of JSON input","stacktrace":"main.main\n\t/workspace/source/main.go:197\nruntime.main\n\t/usr/local/go/src/runtime/proc.go:203"}
 		}
 		for _, record := range notificationInfo.Records {
 			logger.Info("Notification",
