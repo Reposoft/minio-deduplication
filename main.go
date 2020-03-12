@@ -194,6 +194,15 @@ func main() {
 
 	for notificationInfo := range listenCh {
 		if notificationInfo.Err != nil {
+			if notificationInfo.Err.Error() == "unexpected end of JSON input" {
+				// Can't reliably test this with the current test infra, but we fall back to crashlooping if detection fails.
+				// If we constantly get this error without any successful notifications we'll transfer files anyway, per the ListObjects above.
+				// The intention here is to avoid CrashLoopBackOff and instead cause a completion event while the pod keeps running.
+				logger.Info("Notification abort. Exiting 0, intended to cause container restart without failure status.",
+					zap.Error(notificationInfo.Err),
+				)
+				os.Exit(0)
+			}
 			logger.Fatal("Notification error",
 				zap.Error(notificationInfo.Err),
 			)
