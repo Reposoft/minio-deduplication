@@ -78,23 +78,28 @@ func assertBucketExists(name string, minioClient *minio.Client, logger *zap.Logg
 func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 	objectInfo, err := minioClient.StatObject(inbox, blob.Key, minio.StatObjectOptions{})
 	if err != nil {
-		logger.Fatal("Failed to stat object",
+		logger.Fatal("Failed to stat source object",
 			zap.String("key", blob.Key),
-			zap.String("bucket", inbox))
+			zap.String("bucket", inbox),
+			zap.Error(err),
+		)
 	}
 
 	object, err := minioClient.GetObject(inbox, blob.Key, minio.GetObjectOptions{})
 	if err != nil {
-		logger.Fatal("Failed to read object",
+		logger.Fatal("Failed to read source object",
 			zap.String("key", blob.Key),
-			zap.String("bucket", inbox))
+			zap.String("bucket", inbox),
+			zap.Error(err),
+		)
 	}
 	hasher := sha256.New()
 	defer object.Close()
 	if _, err := io.Copy(hasher, object); err != nil {
-		logger.Fatal("Failed to read object to checksum",
+		logger.Fatal("Failed to read source object to checksum",
 			zap.String("key", blob.Key),
 			zap.String("bucket", inbox),
+			zap.Error(err),
 		)
 	}
 	sha256hex := fmt.Sprintf("%x", hasher.Sum(nil))
@@ -112,6 +117,33 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 	downloadName := filepath.Base(blob.Key)
 
 	meta := make(map[string]string)
+
+	existing, err := minioClient.StatObject(archive, blobName, minio.StatObjectOptions{})
+	if err != nil {
+		if err.Error() == "The specified key does not exist." {
+			logger.Debug("Destination path is new", zap.String("key", blobName))
+		} else {
+			logger.Fatal("Failed to stat destination path",
+				zap.String("key", blobName),
+				zap.String("bucket", archive),
+				zap.Error(err),
+			)
+		}
+	} else {
+		logger.Info("Destination path already exists",
+			zap.String("key", blobName),
+			zap.Any("meta", existing.Metadata),
+		)
+	}
+
+	srcMeta := objectInfo.Metadata
+	for k, values := range srcMeta {
+		for _, v := range values {
+			logger.Info("Transferring meta", zap.String(k, v));
+			meta[k] = v
+		}
+	}
+
 	// TODO include cusotm metadata, objectInfo.Metadata?
 	// https://github.com/minio/minio-go/issues/1133 documents that because we add content-disposition we must explicitly add metadata
 	meta["content-type"] = objectInfo.ContentType
