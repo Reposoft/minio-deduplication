@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -78,23 +79,28 @@ func assertBucketExists(name string, minioClient *minio.Client, logger *zap.Logg
 func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 	objectInfo, err := minioClient.StatObject(inbox, blob.Key, minio.StatObjectOptions{})
 	if err != nil {
-		logger.Fatal("Failed to stat object",
+		logger.Fatal("Failed to stat source object",
 			zap.String("key", blob.Key),
-			zap.String("bucket", inbox))
+			zap.String("bucket", inbox),
+			zap.Error(err),
+		)
 	}
 
 	object, err := minioClient.GetObject(inbox, blob.Key, minio.GetObjectOptions{})
 	if err != nil {
-		logger.Fatal("Failed to read object",
+		logger.Fatal("Failed to read source object",
 			zap.String("key", blob.Key),
-			zap.String("bucket", inbox))
+			zap.String("bucket", inbox),
+			zap.Error(err),
+		)
 	}
 	hasher := sha256.New()
 	defer object.Close()
 	if _, err := io.Copy(hasher, object); err != nil {
-		logger.Fatal("Failed to read object to checksum",
+		logger.Fatal("Failed to read source object to checksum",
 			zap.String("key", blob.Key),
 			zap.String("bucket", inbox),
+			zap.Error(err),
 		)
 	}
 	sha256hex := fmt.Sprintf("%x", hasher.Sum(nil))
@@ -112,10 +118,37 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 	downloadName := filepath.Base(blob.Key)
 
 	meta := make(map[string]string)
-	// TODO include cusotm metadata, objectInfo.Metadata?
-	// https://github.com/minio/minio-go/issues/1133 documents that because we add content-disposition we must explicitly add metadata
+
+	existing, err := minioClient.StatObject(archive, blobName, minio.StatObjectOptions{})
+	if err != nil {
+		if err.Error() == "The specified key does not exist." {
+			logger.Debug("Destination path is new", zap.String("key", blobName))
+		} else {
+			logger.Fatal("Failed to stat destination path",
+				zap.String("key", blobName),
+				zap.String("bucket", archive),
+				zap.Error(err),
+			)
+		}
+	} else {
+		logger.Info("Destination path already exists",
+			zap.String("key", blobName),
+			zap.Any("meta", existing.UserMetadata),
+		)
+	}
+
+	srcMeta := objectInfo.UserMetadata
+	for k, v := range srcMeta {
+		logger.Info("Transferring meta", zap.String(k, v));
+		meta[k] = v
+	}
+
 	meta["content-type"] = objectInfo.ContentType
 	meta["content-disposition"] = mime.FormatMediaType("attachment", map[string]string{"filename": downloadName})
+	uploaddir := filepath.Dir(blob.Key)
+	if len(uploaddir) > 0 { // no dir results in .
+		meta["X-Amz-Meta-Uploaddir"] = uploaddir + "/"
+	}
 	dst, err := minio.NewDestinationInfo(archive, blobName, nil, meta)
 
 	if err != nil {
@@ -139,6 +172,14 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 		)
 		return
 	}
+}
+
+func toExtension(key string) string {
+	ext := strings.ToLower(filepath.Ext(key))
+	if ext == ".jpeg" {
+		return ".jpg"
+	}
+	return ext
 }
 
 func main() {
@@ -189,7 +230,7 @@ func main() {
 		logger.Info("Existing inbox object to be transferred", zap.String("key", object.Key))
 		transfer(uploaded{
 			Key: object.Key,
-			Ext: filepath.Ext(object.Key),
+			Ext: toExtension(object.Key),
 		}, minioClient, logger)
 	}
 
@@ -218,7 +259,7 @@ func main() {
 			}
 			transfer(uploaded{
 				Key: key,
-				Ext: filepath.Ext(key),
+				Ext: toExtension(key),
 			}, minioClient, logger)
 		}
 	}
