@@ -107,7 +107,8 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 
 	src := minio.NewSourceInfo(inbox, blob.Key, nil)
 
-	blobName := fmt.Sprintf("%s%s", sha256hex, blob.Ext)
+	blobDir := sha256hex[0:2] + "/" + sha256hex[2:4] + "/"
+	blobName := fmt.Sprintf("%s%s%s", blobDir, sha256hex, blob.Ext)
 	downloadName := filepath.Base(blob.Key)
 
 	meta := make(map[string]string)

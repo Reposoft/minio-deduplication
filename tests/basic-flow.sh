@@ -16,7 +16,9 @@ mc --no-color stat --json minio0/bucket.write/test1.txt | grep '"Content-Type":"
 
 mc --no-color mb minio0/bucket.read
 
-expected=minio0/bucket.read/$(sha256sum test1.txt | cut -d' ' -f1).txt
+hash=$(sha256sum test1.txt | cut -d' ' -f1)
+dir=${hash:0:2}/${hash:2:2}/
+expected=minio0/bucket.read/$dir$hash.txt
 retrywait=0
 until mc --no-color stat "$expected"; \
   do [ $(( retrywait++ )) -lt 10 ]; sleep 1; done
@@ -28,12 +30,12 @@ mc --no-color ls minio0/bucket.read
 echo "Added after watch start" > test2.txt
 mc --no-color cp --attr "Content-Type=text/testing2" test2.txt minio0/bucket.write/
 
-expected=minio0/bucket.read/$(sha256sum test2.txt | cut -d' ' -f1).txt
+hash=$(sha256sum test2.txt | cut -d' ' -f1)
+dir=${hash:0:2}/${hash:2:2}/
+expected=minio0/bucket.read/$dir$hash.txt
 retrywait=0
 until mc --no-color stat "$expected"; \
   do [ $(( retrywait++ )) -lt 10 ]; sleep 1; done
-
-# TODO dir sharding option 0-3
 
 # TODO X-Custom-Header
 
