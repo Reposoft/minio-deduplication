@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -171,6 +172,14 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 	}
 }
 
+func toExtension(key string) string {
+	ext := strings.ToLower(filepath.Ext(key))
+	if ext == ".jpeg" {
+		return ".jpg"
+	}
+	return ext
+}
+
 func main() {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
@@ -219,7 +228,7 @@ func main() {
 		logger.Info("Existing inbox object to be transferred", zap.String("key", object.Key))
 		transfer(uploaded{
 			Key: object.Key,
-			Ext: filepath.Ext(object.Key),
+			Ext: toExtension(object.Key),
 		}, minioClient, logger)
 	}
 
@@ -248,7 +257,7 @@ func main() {
 			}
 			transfer(uploaded{
 				Key: key,
-				Ext: filepath.Ext(key),
+				Ext: toExtension(key),
 			}, minioClient, logger)
 		}
 	}
