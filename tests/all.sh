@@ -6,5 +6,6 @@ basic-flow.sh
 content-disposition.sh
 # remaining tests should not depend on each other
 custom-metadata.sh
+deduplication.sh
 
 echo "_____ all tests executed _____"
