@@ -1,4 +1,4 @@
-FROM golang:1.13.8-alpine3.11@sha256:1ff752199f17b70e5f4dc2ad7f3e7843c456eb7e1407ed158ed8c237dbf1476a
+FROM golang:1.13.9-alpine3.11@sha256:7d45a6fc9cde63c3bf41651736996fe94a8347e726fe581926fd8c26e244e3b2
 
 WORKDIR /workspace/source
 
