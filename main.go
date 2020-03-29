@@ -132,16 +132,14 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 	} else {
 		logger.Info("Destination path already exists",
 			zap.String("key", blobName),
-			zap.Any("meta", existing.Metadata),
+			zap.Any("meta", existing.UserMetadata),
 		)
 	}
 
-	srcMeta := objectInfo.Metadata
-	for k, values := range srcMeta {
-		for _, v := range values {
-			logger.Info("Transferring meta", zap.String(k, v));
-			meta[k] = v
-		}
+	srcMeta := objectInfo.UserMetadata
+	for k, v := range srcMeta {
+		logger.Info("Transferring meta", zap.String(k, v));
+		meta[k] = v
 	}
 
 	// TODO include cusotm metadata, objectInfo.Metadata?
