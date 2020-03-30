@@ -146,7 +146,7 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 	meta["content-type"] = objectInfo.ContentType
 	meta["content-disposition"] = mime.FormatMediaType("attachment", map[string]string{"filename": downloadName})
 	uploaddir := filepath.Dir(blob.Key)
-	if len(uploaddir) > 0 { // no dir results in .
+	if uploaddir != "." {
 		meta["X-Amz-Meta-Uploaddir"] = uploaddir + "/"
 	}
 	dst, err := minio.NewDestinationInfo(archive, blobName, nil, meta)
