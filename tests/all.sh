@@ -9,5 +9,6 @@ custom-metadata.sh
 deduplication.sh
 extensions.sh
 folders.sh
+tagging.sh
 
 echo "_____ all tests executed _____"
