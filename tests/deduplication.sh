@@ -9,6 +9,9 @@ curl -f -v --retry 3 -T "$name" \
   -H 'x-amz-meta-revision: My First' \
   "http://minio0:9000/bucket.write/$name"
 
+# This was to debug, but it actually solved a test failure. Probably because it's a wait.
+mc ls minio0/bucket.read
+
 hash=$(sha256sum "$name" | cut -d' ' -f1)
 dir=${hash:0:2}/${hash:2:2}/
 curl -f -v --retry 3 -I http://minio0:9000/bucket.read/$dir$hash.svg | tee "$name.1.headers"
