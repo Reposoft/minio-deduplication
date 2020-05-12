@@ -1,5 +1,8 @@
 #!/bin/sh
 set -e
+
+sleep 3
+
 # basic-flow also does bucket setup for the other tests
 basic-flow.sh
 # content-disposition sets bucket policies
