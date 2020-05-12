@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-sleep 3
+sleep 1
 
 # basic-flow also does bucket setup for the other tests
 basic-flow.sh
