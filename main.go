@@ -234,6 +234,7 @@ func mainMinio(logger *zap.Logger) error {
 				)
 				return notificationInfo.Err
 			}
+			// TODO we also fail to handle {"level":"fatal","ts":1589272975.0017488,"caller":"source/main.go:237","msg":"Notification error","error":"readObjectStart: expect { or n, but found \u0000, error found in #10 byte of ...|          |..., bigger context ...|                                                  |...","stacktrace":"main.mainMinio\n\t/workspace/source/main.go:237\nmain.main\n\t/workspace/source/main.go:275\nruntime.main\n\t/usr/local/go/src/runtime/proc.go:203"}
 			logger.Fatal("Notification error",
 				zap.Error(notificationInfo.Err),
 			)
