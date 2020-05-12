@@ -182,18 +182,8 @@ func toExtension(key string) string {
 	return ext
 }
 
-func main() {
-	logger, _ := zap.NewDevelopment()
-	defer logger.Sync()
-
-	http.Handle("/metrics", promhttp.Handler())
-	go func() {
-		logger.Info("Starting /metrics server", zap.String("bound", metrics))
-		err := http.ListenAndServe(metrics, nil)
-		if err != nil {
-			logger.Fatal("Failed to start metrics server", zap.Error(err))
-		}
-	}()
+// Will exit on unrecognized errors, but return err on errors we think we can recover from without crashloop
+func mainMinio(logger *zap.Logger) error {
 
 	logger.Info("Initializing minio client", zap.String("host", host), zap.Bool("https", secure))
 	minioClient, err := minio.New(host, accesskey, secretkey, secure)
@@ -238,12 +228,11 @@ func main() {
 		if notificationInfo.Err != nil {
 			if notificationInfo.Err.Error() == "unexpected end of JSON input" {
 				// Can't reliably test this with the current test infra, but we fall back to crashlooping if detection fails.
-				// If we constantly get this error without any successful notifications we'll transfer files anyway, per the ListObjects above.
-				// The intention here is to avoid CrashLoopBackOff and instead cause a completion event while the pod keeps running.
-				logger.Info("Notification abort. Exiting 0, intended to cause container restart without failure status.",
+				// If we get this error without any successful notifications we'll transfer files anyway, per the ListObjects above
+				logger.Info("Notification abort, which we think is a timeout",
 					zap.Error(notificationInfo.Err),
 				)
-				os.Exit(0)
+				return notificationInfo.Err
 			}
 			logger.Fatal("Notification error",
 				zap.Error(notificationInfo.Err),
@@ -261,6 +250,33 @@ func main() {
 				Key: key,
 				Ext: toExtension(key),
 			}, minioClient, logger)
+		}
+	}
+
+	logger.Error("Listener exited without an error, or we failed to handle an error")
+	return nil
+}
+
+
+func main() {
+	logger, _ := zap.NewDevelopment()
+	defer logger.Sync()
+
+	http.Handle("/metrics", promhttp.Handler())
+	go func() {
+		logger.Info("Starting /metrics server", zap.String("bound", metrics))
+		err := http.ListenAndServe(metrics, nil)
+		if err != nil {
+			logger.Fatal("Failed to start metrics server", zap.Error(err))
+		}
+	}()
+
+	for {
+		err := mainMinio(logger)
+		if err != nil {
+			logger.Info("Re-running handler", zap.Error(err))
+		} else {
+			logger.Fatal("Unexpectedly exited without an error")
 		}
 	}
 }
