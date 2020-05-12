@@ -274,6 +274,7 @@ func main() {
 	for {
 		err := mainMinio(logger)
 		if err != nil {
+			// Do we need backoff here? Maybe not while we're so specific about which error that triggers re-run.
 			logger.Info("Re-running handler", zap.Error(err))
 		} else {
 			logger.Fatal("Unexpectedly exited without an error")
