@@ -31,7 +31,7 @@ services:
     - app0
     build: ./tests
     environment:
-    #- DEBUG=true
+    - DEBUG=true
     - MINIO_ACCESS_KEY=minioadmin
     - MINIO_SECRET_KEY=minioadmin
     entrypoint:
