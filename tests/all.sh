@@ -1,8 +1,6 @@
 #!/bin/sh
 set -e
 
-echo "TESTS DISABLED TEMPORARILY" && exit 0
-
 sleep 1
 
 # basic-flow also does bucket setup for the other tests
