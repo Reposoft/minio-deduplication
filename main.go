@@ -249,7 +249,7 @@ func mainMinio(logger *zap.Logger) error {
 				logger.Fatal("Failed to urldecode notification", zap.String("key", record.S3.Object.Key))
 			}
 			if record.S3.Bucket.Name != inbox {
-				logger.Error("Unexpected bucket name. Ignoring.",
+				logger.Error("Unexpected notification bucket. Ignoring.",
 					zap.String("name", record.S3.Bucket.Name),
 					zap.String("expected", inbox))
 				continue
