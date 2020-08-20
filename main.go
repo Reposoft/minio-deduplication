@@ -17,6 +17,8 @@ import (
 
 	"github.com/minio/minio-go/v6"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"go.uber.org/zap"
@@ -36,6 +38,10 @@ var (
 	secretkey string
 	metrics string
 	trace bool
+	ignoredUnexpectedBucket = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "ignored_unexpected_bucket",
+		Help: "The number of notifications ignored because the bucket didn't match the requested name",
+	})
 )
 
 func init() {
@@ -252,6 +258,7 @@ func mainMinio(logger *zap.Logger) error {
 				logger.Error("Unexpected notification bucket. Ignoring.",
 					zap.String("name", record.S3.Bucket.Name),
 					zap.String("expected", inbox))
+				ignoredUnexpectedBucket.Inc()
 				continue
 			}
 			transfer(uploaded{
