@@ -19,9 +19,9 @@ dir=${hash:0:2}/${hash:2:2}/
 curl -f -v --retry 3 -I http://minio0:9000/bucket.read/$dir$hash.json | tee "$one.headers"
 
 echo "Could be useful to know folder names used for upload, let's set a header:"
-cat "$one.headers" | grep 'X-Amz-Meta-Uploaddir: myproject/'
-#cat "$one.headers" | grep 'X-Amz-Meta-Uploaddir: myproject/$'
-#cat "$one.headers" | grep 'X-Amz-Meta-Uploaddir: myproject/\>'
+cat "$one.headers" | grep 'x-amz-meta-uploaddir: myproject/'
+#cat "$one.headers" | grep 'x-amz-meta-uploaddir: myproject/$'
+#cat "$one.headers" | grep 'x-amz-meta-uploaddir: myproject/\>'
 
 curl -f -v --retry 3 -T "$one" \
   -H 'x-amz-meta-note: Same Same' \

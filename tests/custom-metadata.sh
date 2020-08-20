@@ -14,4 +14,4 @@ mc --no-color stat --json minio0/bucket.write/$name | grep '"X-Amz-Meta-My-Capti
 hash=$(sha256sum "$name" | cut -d' ' -f1)
 dir=${hash:0:2}/${hash:2:2}/
 curl -f -v --retry 3 -I http://minio0:9000/bucket.read/$dir$hash.md | tee "$name.headers"
-cat "$name.headers" | grep 'X-Amz-Meta-My-Caption: Amazing story by me'
+cat "$name.headers" | grep 'x-amz-meta-my-caption: Amazing story by me'
