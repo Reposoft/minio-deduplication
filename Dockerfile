@@ -1,4 +1,4 @@
-FROM golang:1.14.2-alpine3.11@sha256:9b3ad7928626126b72b916609ad081cfb6c0149f6e60cef7fc1e9e15a0d1e973
+FROM golang:1.14.7-alpine3.12@sha256:e9f6373299678506eaa6e632d5a8d7978209c430aa96c785e5edcb1eebf4885e
 
 WORKDIR /workspace/source
 
@@ -15,7 +15,7 @@ RUN sed -i 's/zap.NewDevelopment()/zap.NewProduction()/' main.go
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
   go build -ldflags '-w -extldflags "-static"'
 
-FROM gcr.io/distroless/base:nonroot@sha256:54c459100e9d420e023b0aecc43f7010d2731b6163dd8e060906e2dec4c59890
+FROM gcr.io/distroless/base:nonroot@sha256:e995d1bbbf277050ddc2ca9df0fe01c6fd820c2bfa6d6edb3a0452614a939912
 
 COPY --from=0 /workspace/source/v1 /usr/local/bin/v1
 
