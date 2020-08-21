@@ -42,6 +42,9 @@ curl -s http://app0:2112/metrics | grep 'blobs_'
 
 [ "$(curl -s http://app0:2112/metrics  | grep ^blobs_transfers_completed | cut -d' ' -f2)" = "2" ]
 
+echo "Upon successful transfers the write bucket should be empty"
+[ "$(mc --no-color ls minio0/bucket.write | wc -l)" = "0" ]
+
 # TODO X-Custom-Header
 
 echo "Test completed"
