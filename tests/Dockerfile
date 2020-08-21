@@ -1,5 +1,5 @@
-FROM minio/mc:RELEASE.2020-02-25T18-10-03Z@sha256:d122cc5152218b16c79d4950a20910bd2c714ca661544271c5eaff4dfd51bc57
+FROM minio/mc:RELEASE.2020-08-20T00-23-01Z@sha256:0e85dec50046c374e7062cfaaab4ba78f41f381832b1d230671d6650a4124740
 
-RUN apk add --no-cache curl
+RUN apk add --no-cache curl jq
 
 COPY *.sh /usr/local/bin/
