@@ -34,6 +34,7 @@ services:
     build: ./tests
     environment:
     - DEBUG=true
+    - TESTS_DISABLED=${TESTS_DISABLED:-true}
     - MINIO_ACCESS_KEY=minioadmin
     - MINIO_SECRET_KEY=minioadmin
     entrypoint:

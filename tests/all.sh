@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+[ "$TESTS_DISABLED" = "true" ] && echo "Tests disabled through env TESTS_DISABLED=true" && exit 0
+
 sleep 1
 
 # basic-flow also does bucket setup for the other tests
