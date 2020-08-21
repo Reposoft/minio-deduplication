@@ -18,6 +18,7 @@ import (
 	"github.com/minio/minio-go/v6"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"go.uber.org/zap"
@@ -37,22 +38,22 @@ var (
 	secretkey string
 	metrics string
 	trace bool
-	ignoredUnexpectedBucket = prometheus.NewCounter(prometheus.CounterOpts{
+	ignoredUnexpectedBucket = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "blobs_ignored_unexpected_bucket",
 		Help: "The number of notifications ignored because the bucket didn't match the requested name",
 	})
-	transfersStarted = prometheus.NewCounterVec(
+	transfersStarted = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "blobs_transfers_initiated",
 			Help: "The number of transfers started, by trigger method",
 		},
 		[]string{"trigger"},
 	)
-	transfersCompleted = prometheus.NewCounter(prometheus.CounterOpts{
+	transfersCompleted = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "blobs_transfers_completed",
 		Help: "The number of copy operations that completed without errors",
 	})
-	duplicates = prometheus.NewCounter(prometheus.CounterOpts{
+	duplicates = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "blobs_duplicates",
 		Help: "How many times a destination object existed (we still try to update metadata)",
 	})
