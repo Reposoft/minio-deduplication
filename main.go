@@ -18,7 +18,6 @@ import (
 	"github.com/minio/minio-go/v6"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"go.uber.org/zap"
@@ -38,9 +37,24 @@ var (
 	secretkey string
 	metrics string
 	trace bool
-	ignoredUnexpectedBucket = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "ignored_unexpected_bucket",
+	ignoredUnexpectedBucket = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "blobs_ignored_unexpected_bucket",
 		Help: "The number of notifications ignored because the bucket didn't match the requested name",
+	})
+	transfersStarted = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "blobs_transfers_initiated",
+			Help: "The number of transfers started, by trigger method",
+		},
+		[]string{"trigger"},
+	)
+	transfersCompleted = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "blobs_transfers_completed",
+		Help: "The number of copy operations that completed without errors",
+	})
+	duplicates = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "blobs_duplicates",
+		Help: "How many times a destination object existed (we still try to update metadata)",
 	})
 )
 
@@ -141,6 +155,7 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 			zap.String("key", blobName),
 			zap.Any("meta", existing.UserMetadata),
 		)
+		duplicates.Inc()
 	}
 
 	srcMeta := objectInfo.UserMetadata
@@ -178,6 +193,7 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 		)
 		return
 	}
+	transfersCompleted.Inc()
 }
 
 func toExtension(key string) string {
@@ -224,6 +240,7 @@ func mainMinio(logger *zap.Logger) error {
 			logger.Fatal("List object error", zap.Error(object.Err))
 		}
 		logger.Info("Existing inbox object to be transferred", zap.String("key", object.Key))
+		transfersStarted.With(prometheus.Labels{"trigger":"listing"}).Inc()
 		transfer(uploaded{
 			Key: object.Key,
 			Ext: toExtension(object.Key),
@@ -261,6 +278,7 @@ func mainMinio(logger *zap.Logger) error {
 				ignoredUnexpectedBucket.Inc()
 				continue
 			}
+			transfersStarted.With(prometheus.Labels{"trigger":"notification"}).Inc()
 			transfer(uploaded{
 				Key: key,
 				Ext: toExtension(key),
