@@ -6,7 +6,7 @@ curl -f --retry 3 --retry-connrefused http://app0:2112/metrics > /dev/null
 
 retrywait=0
 until mc --no-color config host add minio0 http://minio0:9000 $MINIO_ACCESS_KEY $MINIO_SECRET_KEY; \
-  do [ $(( retrywait++ )) -lt 5 ]; sleep 1; done
+  do [ $(( retrywait++ )) -lt 30 ]; sleep 1; done
 
 mc --no-color mb minio0/bucket.write
 
