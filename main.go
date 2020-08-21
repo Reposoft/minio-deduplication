@@ -194,6 +194,30 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 		)
 		return
 	}
+
+	// This check for destination existence is just a safeguard, because we don't get a lot of feedback from CopyObject
+	// Should we check that metadata was transferred too?
+	existing, confirmErr := minioClient.StatObject(archive, blobName, minio.StatObjectOptions{})
+	if confirmErr != nil {
+		logger.Fatal("Destination blob not found after copy.",
+			zap.String("key", blobName),
+			zap.String("bucket", archive),
+			zap.Error(confirmErr),
+		)
+	} else {
+		logger.Debug("Destination existence confirmed. Deleting inbox item.",
+			zap.String("key", blob.Key),
+			zap.String("bucket", inbox),
+		)
+		cleanupErr := minioClient.RemoveObject(inbox, blob.Key)
+		if cleanupErr != nil {
+			logger.Fatal("Failed to clean up after blob copy. Inbox item probably still exists.",
+				zap.String("key", inbox),
+				zap.String("bucket", blob.Key),
+				zap.Error(err),
+			)
+		}
+	}
 	transfersCompleted.Inc()
 }
 
