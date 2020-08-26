@@ -6,7 +6,7 @@ curl -f --retry 3 --retry-connrefused http://app0:2112/metrics > /dev/null
 
 retrywait=0
 until mc --no-color config host add minio0 http://minio0:9000 $MINIO_ACCESS_KEY $MINIO_SECRET_KEY; \
-  do [ $(( retrywait++ )) -lt 5 ]; sleep 1; done
+  do [ $(( retrywait++ )) -lt 30 ]; sleep 1; done
 
 mc --no-color mb minio0/bucket.write
 
@@ -36,6 +36,14 @@ expected=minio0/bucket.read/$dir$hash.txt
 retrywait=0
 until mc --no-color stat "$expected"; \
   do [ $(( retrywait++ )) -lt 10 ]; sleep 1; done
+
+echo "Metrics: "
+curl -s http://app0:2112/metrics | grep 'blobs_'
+
+[ "$(curl -s http://app0:2112/metrics  | grep ^blobs_transfers_completed | cut -d' ' -f2)" = "2" ]
+
+echo "Upon successful transfers the write bucket should be empty"
+[ "$(mc --no-color ls minio0/bucket.write | wc -l)" = "0" ]
 
 # TODO X-Custom-Header
 

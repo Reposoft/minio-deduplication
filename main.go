@@ -17,6 +17,8 @@ import (
 
 	"github.com/minio/minio-go/v6"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"go.uber.org/zap"
@@ -36,6 +38,25 @@ var (
 	secretkey string
 	metrics string
 	trace bool
+	ignoredUnexpectedBucket = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "blobs_ignored_unexpected_bucket",
+		Help: "The number of notifications ignored because the bucket didn't match the requested name",
+	})
+	transfersStarted = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "blobs_transfers_initiated",
+			Help: "The number of transfers started, by trigger method",
+		},
+		[]string{"trigger"},
+	)
+	transfersCompleted = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "blobs_transfers_completed",
+		Help: "The number of copy operations that completed without errors",
+	})
+	duplicates = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "blobs_duplicates",
+		Help: "How many times a destination object existed (we still try to update metadata)",
+	})
 )
 
 func init() {
@@ -135,6 +156,7 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 			zap.String("key", blobName),
 			zap.Any("meta", existing.UserMetadata),
 		)
+		duplicates.Inc()
 	}
 
 	srcMeta := objectInfo.UserMetadata
@@ -172,6 +194,31 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 		)
 		return
 	}
+
+	// This check for destination existence is just a safeguard, because we don't get a lot of feedback from CopyObject
+	// Should we check that metadata was transferred too?
+	existing, confirmErr := minioClient.StatObject(archive, blobName, minio.StatObjectOptions{})
+	if confirmErr != nil {
+		logger.Fatal("Destination blob not found after copy.",
+			zap.String("key", blobName),
+			zap.String("bucket", archive),
+			zap.Error(confirmErr),
+		)
+	} else {
+		logger.Debug("Destination existence confirmed. Deleting inbox item.",
+			zap.String("key", blob.Key),
+			zap.String("bucket", inbox),
+		)
+		cleanupErr := minioClient.RemoveObject(inbox, blob.Key)
+		if cleanupErr != nil {
+			logger.Fatal("Failed to clean up after blob copy. Inbox item probably still exists.",
+				zap.String("key", inbox),
+				zap.String("bucket", blob.Key),
+				zap.Error(err),
+			)
+		}
+	}
+	transfersCompleted.Inc()
 }
 
 func toExtension(key string) string {
@@ -218,6 +265,7 @@ func mainMinio(logger *zap.Logger) error {
 			logger.Fatal("List object error", zap.Error(object.Err))
 		}
 		logger.Info("Existing inbox object to be transferred", zap.String("key", object.Key))
+		transfersStarted.With(prometheus.Labels{"trigger":"listing"}).Inc()
 		transfer(uploaded{
 			Key: object.Key,
 			Ext: toExtension(object.Key),
@@ -248,6 +296,14 @@ func mainMinio(logger *zap.Logger) error {
 			if err != nil {
 				logger.Fatal("Failed to urldecode notification", zap.String("key", record.S3.Object.Key))
 			}
+			if record.S3.Bucket.Name != inbox {
+				logger.Error("Unexpected notification bucket. Ignoring.",
+					zap.String("name", record.S3.Bucket.Name),
+					zap.String("expected", inbox))
+				ignoredUnexpectedBucket.Inc()
+				continue
+			}
+			transfersStarted.With(prometheus.Labels{"trigger":"notification"}).Inc()
 			transfer(uploaded{
 				Key: key,
 				Ext: toExtension(key),

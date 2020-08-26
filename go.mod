@@ -4,12 +4,14 @@ go 1.13
 
 require (
 	github.com/cenkalti/backoff/v4 v4.0.0
-	github.com/minio/minio-go/v6 v6.0.55
-	github.com/prometheus/client_golang v1.6.0
+	github.com/json-iterator/go v1.1.10 // indirect
+	github.com/klauspost/cpuid v1.3.1 // indirect
+	github.com/minio/minio-go/v6 v6.0.57
+	github.com/prometheus/client_golang v1.7.1
 	go.uber.org/zap v1.15.0
-	golang.org/x/crypto v0.0.0-20200510223506-06a226fb4e37 // indirect
-	golang.org/x/net v0.0.0-20200506145744-7e3656a0809f // indirect
-	golang.org/x/sys v0.0.0-20200511232937-7e40ca221e25 // indirect
-	golang.org/x/text v0.3.2 // indirect
-	gopkg.in/ini.v1 v1.56.0 // indirect
+	golang.org/x/crypto v0.0.0-20200728195943-123391ffb6de // indirect
+	golang.org/x/net v0.0.0-20200813134508-3edf25e44fcc // indirect
+	golang.org/x/sys v0.0.0-20200819171115-d785dc25833f // indirect
+	golang.org/x/text v0.3.3 // indirect
+	gopkg.in/ini.v1 v1.60.0 // indirect
 )
