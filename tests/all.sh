@@ -15,5 +15,6 @@ deduplication.sh
 extensions.sh
 folders.sh
 tagging.sh
+zero-padded-checksums.sh
 
 echo "_____ all tests executed _____"
