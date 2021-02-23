@@ -16,5 +16,6 @@ extensions.sh
 folders.sh
 tagging.sh
 zero-padded-checksums.sh
+filename-encoding.sh
 
 echo "_____ all tests executed _____"
