@@ -2,7 +2,7 @@ version: '2.4'
 services:
 
   minio0:
-    image: minio/minio:RELEASE.2021-02-19T04-38-02Z@sha256:6e5cff0fa8efb1ed61697e439cd04568dc49635861eb26cc8e01593a2676a5ed
+    image: minio/minio:RELEASE.2021-02-23T20-05-01Z@sha256:06790c53390ce6cef39b0ca501f02f1f9d6d241daf7d19721bf45a7cee396e98
     command:
     - server
     - /data
