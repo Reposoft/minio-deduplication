@@ -1,13 +1,12 @@
 package main
 
 import (
-	"io"
 	"crypto/sha256"
 	"flag"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,14 +29,14 @@ type uploaded struct {
 }
 
 var (
-	inbox string
-	archive string
-	host string
-	secure bool
-	accesskey string
-	secretkey string
-	metrics string
-	trace bool
+	inbox                   string
+	archive                 string
+	host                    string
+	secure                  bool
+	accesskey               string
+	secretkey               string
+	metrics                 string
+	trace                   bool
 	ignoredUnexpectedBucket = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "blobs_ignored_unexpected_bucket",
 		Help: "The number of notifications ignored because the bucket didn't match the requested name",
@@ -161,7 +160,7 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 
 	srcMeta := objectInfo.UserMetadata
 	for k, v := range srcMeta {
-		logger.Info("Transferring meta", zap.String(k, v));
+		logger.Info("Transferring meta", zap.String(k, v))
 		meta[k] = v
 	}
 
@@ -265,7 +264,7 @@ func mainMinio(logger *zap.Logger) error {
 			logger.Fatal("List object error", zap.Error(object.Err))
 		}
 		logger.Info("Existing inbox object to be transferred", zap.String("key", object.Key))
-		transfersStarted.With(prometheus.Labels{"trigger":"listing"}).Inc()
+		transfersStarted.With(prometheus.Labels{"trigger": "listing"}).Inc()
 		transfer(uploaded{
 			Key: object.Key,
 			Ext: toExtension(object.Key),
@@ -292,10 +291,7 @@ func mainMinio(logger *zap.Logger) error {
 			logger.Info("Notification",
 				zap.Any("record", record),
 			)
-			key, err := url.QueryUnescape(record.S3.Object.Key)
-			if err != nil {
-				logger.Fatal("Failed to urldecode notification", zap.String("key", record.S3.Object.Key))
-			}
+			key := record.S3.Object.Key
 			if record.S3.Bucket.Name != inbox {
 				logger.Error("Unexpected notification bucket. Ignoring.",
 					zap.String("name", record.S3.Bucket.Name),
@@ -303,7 +299,7 @@ func mainMinio(logger *zap.Logger) error {
 				ignoredUnexpectedBucket.Inc()
 				continue
 			}
-			transfersStarted.With(prometheus.Labels{"trigger":"notification"}).Inc()
+			transfersStarted.With(prometheus.Labels{"trigger": "notification"}).Inc()
 			transfer(uploaded{
 				Key: key,
 				Ext: toExtension(key),
@@ -314,7 +310,6 @@ func mainMinio(logger *zap.Logger) error {
 	logger.Error("Listener exited without an error, or we failed to handle an error")
 	return nil
 }
-
 
 func main() {
 	logger, _ := zap.NewDevelopment()

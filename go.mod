@@ -4,7 +4,6 @@ go 1.13
 
 require (
 	github.com/cenkalti/backoff/v4 v4.0.0
-	github.com/json-iterator/go v1.1.10 // indirect
 	github.com/klauspost/cpuid v1.3.1 // indirect
 	github.com/minio/minio-go/v6 v6.0.57
 	github.com/prometheus/client_golang v1.7.1
