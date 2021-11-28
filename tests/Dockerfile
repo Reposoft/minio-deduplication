@@ -1,5 +1,5 @@
-FROM minio/mc:RELEASE.2020-10-03T02-54-56Z@sha256:19c0ad83449d760bf85ea81f6794d1223639858acb423c095fe34b54cbfacd12
+FROM minio/mc:RELEASE.2021-11-16T20-37-36Z@sha256:be40d98a0e70d655c23d6b1c0c5ffdc4999d2b232b3b6548dd0d280ef8ca6814
 
-RUN apk add --no-cache curl jq
+RUN microdnf install jq --nodocs
 
 COPY *.sh /usr/local/bin/
