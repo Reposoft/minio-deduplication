@@ -148,6 +148,7 @@ func transfer(ctx context.Context, blob uploaded, minioClient *minio.Client, log
 	if err != nil {
 		if err.Error() == "The specified key does not exist." {
 			logger.Debug("Destination path is new", zap.String("key", blobName))
+			err = nil
 		} else {
 			logger.Fatal("Failed to stat destination path",
 				zap.String("key", blobName),
