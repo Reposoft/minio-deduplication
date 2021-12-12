@@ -8,7 +8,7 @@ services:
     - /data
     expose:
     - 9000
-    mem_limit: 80000000
+    mem_limit: 40000000
 
   app0:
     depends_on:
