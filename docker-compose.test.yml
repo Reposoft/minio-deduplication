@@ -2,7 +2,7 @@ version: '2.4'
 services:
 
   minio0:
-    image: docker.io/minio/minio:RELEASE.2021-11-09T03-21-45Z@sha256:e5048d2a503e0f2a18de9752831a8bf27a3e8a0eeebe35a87b9c56f967a9ef85
+    image: docker.io/minio/minio:RELEASE.2021-11-09T03-21-45Z
     command:
     - server
     - /data
