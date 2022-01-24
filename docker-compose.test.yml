@@ -2,13 +2,13 @@ version: '2.4'
 services:
 
   minio0:
-    image: docker.io/minio/minio:RELEASE.2021-03-17T02-33-02Z@sha256:d33b2e9559ee59acf7591cd83cb7238837158a316956e6140e6692a8e4e12fe9
+    image: docker.io/minio/minio:RELEASE.2021-11-09T03-21-45Z
     command:
     - server
     - /data
     expose:
     - 9000
-    mem_limit: 20000000
+    mem_limit: 40000000
 
   app0:
     depends_on:

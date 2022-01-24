@@ -1,5 +1,7 @@
 #!/bin/bash
 
+echo "DOCKER_DEFAULT_PLATFORM=$DOCKER_DEFAULT_PLATFORM"
+
 #  Note that to troubleshoot it's better to run docker-compose -f docker-compose.test.yml up
 
 # What we think Docker Hub is running

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"flag"
 	"fmt"
@@ -14,7 +15,8 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 
-	"github.com/minio/minio-go/v6"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -70,9 +72,9 @@ func init() {
 	flag.Parse()
 }
 
-func assertBucketExists(name string, minioClient *minio.Client, logger *zap.Logger) {
+func assertBucketExists(ctx context.Context, name string, minioClient *minio.Client, logger *zap.Logger) {
 	check := func() error {
-		found, err := minioClient.BucketExists(name)
+		found, err := minioClient.BucketExists(ctx, name)
 		if err != nil {
 			return err
 		}
@@ -96,8 +98,8 @@ func assertBucketExists(name string, minioClient *minio.Client, logger *zap.Logg
 	}
 }
 
-func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
-	objectInfo, err := minioClient.StatObject(inbox, blob.Key, minio.StatObjectOptions{})
+func transfer(ctx context.Context, blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
+	objectInfo, err := minioClient.StatObject(ctx, inbox, blob.Key, minio.StatObjectOptions{})
 	if err != nil {
 		logger.Fatal("Failed to stat source object",
 			zap.String("key", blob.Key),
@@ -106,7 +108,7 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 		)
 	}
 
-	object, err := minioClient.GetObject(inbox, blob.Key, minio.GetObjectOptions{})
+	object, err := minioClient.GetObject(ctx, inbox, blob.Key, minio.GetObjectOptions{})
 	if err != nil {
 		logger.Fatal("Failed to read source object",
 			zap.String("key", blob.Key),
@@ -131,7 +133,10 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 		zap.String("write", write),
 	)
 
-	src := minio.NewSourceInfo(inbox, blob.Key, nil)
+	src := minio.CopySrcOptions{
+		Bucket: inbox,
+		Object: blob.Key,
+	}
 
 	blobDir := sha256hex[0:2] + "/" + sha256hex[2:4] + "/"
 	blobName := fmt.Sprintf("%s%s%s", blobDir, sha256hex, blob.Ext)
@@ -139,10 +144,11 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 
 	meta := make(map[string]string)
 
-	existing, err := minioClient.StatObject(archive, blobName, minio.StatObjectOptions{})
+	existing, err := minioClient.StatObject(ctx, archive, blobName, minio.StatObjectOptions{})
 	if err != nil {
 		if err.Error() == "The specified key does not exist." {
 			logger.Debug("Destination path is new", zap.String("key", blobName))
+			err = nil
 		} else {
 			logger.Fatal("Failed to stat destination path",
 				zap.String("key", blobName),
@@ -170,21 +176,17 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 	if uploaddir != "." {
 		meta["X-Amz-Meta-Uploaddir"] = uploaddir + "/"
 	}
-	dst, err := minio.NewDestinationInfo(archive, blobName, nil, meta)
-
-	if err != nil {
-		logger.Error("Failed to define transfer destination",
-			zap.String("key", blob.Key),
-			zap.String("archive", archive),
-			zap.Error(err),
-		)
-		return
+	dst := minio.CopyDestOptions{
+		Bucket:          archive,
+		Object:          blobName,
+		UserMetadata:    meta,
+		ReplaceMetadata: true,
 	}
 
 	// TODO content disposition
 
 	// Copy object call
-	err = minioClient.CopyObject(dst, src)
+	uploadInfo, err := minioClient.CopyObject(ctx, dst, src)
 	if err != nil {
 		logger.Error("Failed to transfer",
 			zap.String("key", blob.Key),
@@ -194,9 +196,15 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 		return
 	}
 
+	// TODO with v7 we get uploadInfo so the safeguard below might not be needed
+	logger.Debug("Copied",
+		zap.String("bucket", uploadInfo.Bucket),
+		zap.String("key", uploadInfo.Key),
+		zap.String("etag", uploadInfo.ETag),
+	)
 	// This check for destination existence is just a safeguard, because we don't get a lot of feedback from CopyObject
 	// Should we check that metadata was transferred too?
-	existing, confirmErr := minioClient.StatObject(archive, blobName, minio.StatObjectOptions{})
+	existing, confirmErr := minioClient.StatObject(ctx, archive, blobName, minio.StatObjectOptions{})
 	if confirmErr != nil {
 		logger.Fatal("Destination blob not found after copy.",
 			zap.String("key", blobName),
@@ -208,7 +216,7 @@ func transfer(blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 			zap.String("key", blob.Key),
 			zap.String("bucket", inbox),
 		)
-		cleanupErr := minioClient.RemoveObject(inbox, blob.Key)
+		cleanupErr := minioClient.RemoveObject(ctx, inbox, blob.Key, minio.RemoveObjectOptions{})
 		if cleanupErr != nil {
 			logger.Fatal("Failed to clean up after blob copy. Inbox item probably still exists.",
 				zap.String("key", inbox),
@@ -229,10 +237,15 @@ func toExtension(key string) string {
 }
 
 // Will exit on unrecognized errors, but return err on errors we think we can recover from without crashloop
-func mainMinio(logger *zap.Logger) error {
+func mainMinio(ctx context.Context, logger *zap.Logger) error {
+
+	options := &minio.Options{
+		Creds:  credentials.NewStaticV4(accesskey, secretkey, ""),
+		Secure: false,
+	}
 
 	logger.Info("Initializing minio client", zap.String("host", host), zap.Bool("https", secure))
-	minioClient, err := minio.New(host, accesskey, secretkey, secure)
+	minioClient, err := minio.New(host, options)
 	if err != nil {
 		logger.Fatal("Failed to set up minio client",
 			zap.Error(err),
@@ -243,29 +256,26 @@ func mainMinio(logger *zap.Logger) error {
 		minioClient.TraceOn(os.Stderr)
 	}
 
-	assertBucketExists(inbox, minioClient, logger)
-	assertBucketExists(archive, minioClient, logger)
+	assertBucketExists(ctx, inbox, minioClient, logger)
+	assertBucketExists(ctx, archive, minioClient, logger)
 	logger.Info("Bucket existence confirmed", zap.String("inbox", inbox), zap.String("archive", archive))
 
 	logger.Info("Starting bucket notifications listener")
-	doneCh := make(chan struct{})
-	defer close(doneCh)
-	listenCh := minioClient.ListenBucketNotification(inbox, "", "", []string{
+	listenCh := minioClient.ListenBucketNotification(ctx, inbox, "", "", []string{
 		"s3:ObjectCreated:*",
-	}, doneCh)
+	})
 
 	logger.Info("Listing existing inbox objects")
-	listDoneCh := make(chan struct{})
-	defer close(listDoneCh)
-	isRecursive := true
-	objectCh := minioClient.ListObjectsV2(inbox, "", isRecursive, listDoneCh)
+	objectCh := minioClient.ListObjects(ctx, inbox, minio.ListObjectsOptions{
+		Recursive: true,
+	})
 	for object := range objectCh {
 		if object.Err != nil {
 			logger.Fatal("List object error", zap.Error(object.Err))
 		}
 		logger.Info("Existing inbox object to be transferred", zap.String("key", object.Key))
 		transfersStarted.With(prometheus.Labels{"trigger": "listing"}).Inc()
-		transfer(uploaded{
+		transfer(ctx, uploaded{
 			Key: object.Key,
 			Ext: toExtension(object.Key),
 		}, minioClient, logger)
@@ -300,7 +310,7 @@ func mainMinio(logger *zap.Logger) error {
 				continue
 			}
 			transfersStarted.With(prometheus.Labels{"trigger": "notification"}).Inc()
-			transfer(uploaded{
+			transfer(ctx, uploaded{
 				Key: key,
 				Ext: toExtension(key),
 			}, minioClient, logger)
@@ -312,6 +322,9 @@ func mainMinio(logger *zap.Logger) error {
 }
 
 func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
@@ -325,7 +338,7 @@ func main() {
 	}()
 
 	for {
-		err := mainMinio(logger)
+		err := mainMinio(ctx, logger)
 		if err != nil {
 			// Do we need backoff here? Maybe not while we're so specific about which error that triggers re-run.
 			logger.Info("Re-running handler", zap.Error(err))

@@ -1,4 +1,4 @@
-FROM golang:1.16.2@sha256:3b49126489462d4639157174691b6133df4328b135b1583be0377a4a5a8e4911
+FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.17.4-bullseye
 
 WORKDIR /workspace/source
 
@@ -12,10 +12,12 @@ COPY . .
 
 RUN sed -i 's/zap.NewDevelopment()/zap.NewProduction()/' main.go
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+ARG TARGETOS TARGETARCH
+RUN GOOS=$TARGETOS GOARCH=$TARGETARCH \
+  CGO_ENABLED=0 \
   go build -ldflags '-w -extldflags "-static"'
 
-FROM gcr.io/distroless/base:nonroot@sha256:d2655108279c251a02894b108941dba005817cb2e662f59bdc77ff900bfe9869
+FROM --platform=${TARGETPLATFORM:-linux/amd64} gcr.io/distroless/static-debian11:nonroot
 
 COPY --from=0 /workspace/source/v1 /usr/local/bin/v1
 
