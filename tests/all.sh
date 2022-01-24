@@ -17,5 +17,6 @@ folders.sh
 tagging.sh
 zero-padded-checksums.sh
 filename-encoding.sh
+upload-path-tracking.sh
 
 echo "_____ all tests executed _____"
