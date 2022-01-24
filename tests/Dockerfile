@@ -1,4 +1,4 @@
-FROM --platform=${TARGETPLATFORM:-linux/amd64} minio/mc:RELEASE.2021-11-16T20-37-36Z
+FROM --platform=${TARGETPLATFORM:-linux/amd64} minio/mc:RELEASE.2022-01-07T06-01-38Z
 
 RUN microdnf install jq --nodocs
 
