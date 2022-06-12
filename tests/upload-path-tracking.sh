@@ -20,8 +20,8 @@ curl -f -v --retry 3 -T "$name" \
 
 curl -f -v --retry 3 -T "$name" \
   -H 'x-amz-meta-my-test: My meta' \
-  "http://minio0:9000/bucket.write/other/upload/other$name"
+  "http://minio0:9000/bucket.write/other/upload/other; $name"
 mc --no-color stat --json minio0/bucket.read/$dir$hash.md | jq -r '.metadata'
-[ "$(mc --no-color stat --json minio0/bucket.read/$dir$hash.md | jq -r '.metadata."X-Amz-Meta-Uploadpaths"')" = "original/dir/$name;other/upload/other$name" ]
+[ "$(mc --no-color stat --json minio0/bucket.read/$dir$hash.md | jq -r '.metadata."X-Amz-Meta-Uploadpaths"')" = "original/dir/$name;other/upload/other%3B $name" ]
 curl -f -v --retry 3 -I http://minio0:9000/bucket.read/$dir$hash.md | tee "$name.headers"
 cat "$name.headers" | grep "Content-Disposition: attachment; filename=\"other$name\""
