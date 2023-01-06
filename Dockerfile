@@ -1,4 +1,4 @@
-FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.19.3-bullseye
+FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.19.4-bullseye
 
 WORKDIR /workspace/source
 

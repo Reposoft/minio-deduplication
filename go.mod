@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/cenkalti/backoff/v4 v4.2.0
-	github.com/minio/minio-go/v7 v7.0.45
+	github.com/minio/minio-go/v7 v7.0.46
 	github.com/prometheus/client_golang v1.14.0
 	go.uber.org/zap v1.24.0
 )

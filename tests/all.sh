@@ -13,8 +13,7 @@ content-disposition.sh
 custom-metadata.sh
 deduplication.sh
 extensions.sh
-# DEPRECATED header x-amz-meta-uploaddir:
-# folders.sh
+folders.sh
 tagging.sh
 zero-padded-checksums.sh
 filename-encoding.sh
