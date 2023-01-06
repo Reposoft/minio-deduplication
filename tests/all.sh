@@ -9,11 +9,12 @@ sleep 1
 basic-flow.sh
 # content-disposition sets bucket policies
 content-disposition.sh
-# remaining tests should not depend on each other
+# # remaining tests should not depend on each other
 custom-metadata.sh
 deduplication.sh
 extensions.sh
-folders.sh
+# DEPRECATED header x-amz-meta-uploaddir:
+# folders.sh
 tagging.sh
 zero-padded-checksums.sh
 filename-encoding.sh
