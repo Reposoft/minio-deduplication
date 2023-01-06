@@ -23,6 +23,11 @@ func TestAppend(t *testing.T) {
 		t.Errorf("Unexpected %s", escaped)
 	}
 
+	duplicate := metadata.AppendPath(escaped, "/absolute/path.png")
+	if duplicate != "my/path.png; /absolute/path.png; %3B strange%3BPATH.jpeg" {
+		t.Errorf("Unexpected %s", duplicate)
+	}
+
 }
 
 func TestNext(t *testing.T) {

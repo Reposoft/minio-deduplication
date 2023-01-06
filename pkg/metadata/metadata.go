@@ -28,6 +28,13 @@ func AppendPath(list string, value string) string {
 		return encoded
 	}
 
+	split := strings.Split(list, separator)
+	for _, path := range split {
+		if path == value {
+			return list
+		}
+	}
+
 	return list + separator + encoded
 }
 
