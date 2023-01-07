@@ -1,7 +1,13 @@
-#!/bin/sh
-set -e
+#!/bin/bash
+set -eEo pipefail
 
 [ "$TESTS_DISABLED" = "true" ] && echo "Tests disabled through env TESTS_DISABLED=true" && exit 0
+
+function onerr {
+  after-all.sh
+}
+
+trap onerr ERR
 
 sleep 1
 
@@ -20,3 +26,5 @@ filename-encoding.sh
 upload-path-tracking.sh
 
 echo "_____ all tests executed _____"
+after-all.sh
+echo "_____         ok         _____"

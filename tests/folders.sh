@@ -1,5 +1,5 @@
-#!/bin/sh
-set -e
+#!/bin/bash
+set -eo pipefail
 [ -z "$DEBUG" ] || set -x
 
 one="package.json"

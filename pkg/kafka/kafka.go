@@ -18,7 +18,7 @@ type KafkaConsumerConfig struct {
 	ConsumerGroup string
 }
 
-func NewKafka(ctx context.Context, config *KafkaConsumerConfig) {
+func NewKafka(ctx context.Context, config *KafkaConsumerConfig) <-chan notification.Info {
 	// One client can both produce and consume!
 	// Consuming can either be direct (no consumer group), or through a group. Below, we use a group.
 	cl, err := kgo.NewClient(
@@ -35,48 +35,63 @@ func NewKafka(ctx context.Context, config *KafkaConsumerConfig) {
 			zap.Error(err),
 		)
 	}
-	defer cl.Close()
 
 	// https://github.com/minio/minio-go/blob/v7.0.46/api-bucket-notification.go#L209
 	json := jsoniter.ConfigCompatibleWithStandardLibrary
 
-	for {
-		fetches := cl.PollFetches(ctx)
-		if errs := fetches.Errors(); len(errs) > 0 {
-			config.Logger.Fatal("Non-retryable consumer error",
-				zap.String("errors", fmt.Sprint(errs)),
-			)
-		}
+	ch := make(chan notification.Info)
 
-		fetches.EachPartition(func(p kgo.FetchTopicPartition) {
-			// We can even use a second callback!
-			p.EachRecord(func(record *kgo.Record) {
-				var notificationInfo notification.Info
-				err := json.Unmarshal(record.Value, &notificationInfo)
-				if err != nil {
-					// we'd need to export a counter here if we want to skip over unrecognized events
-					config.Logger.Fatal("Failed to unmarshal notification",
-						zap.String("topic", record.Topic),
-						zap.Int32("partition", record.Partition),
-						zap.ByteString("key", record.Key),
-						zap.ByteString("value", record.Value),
-						zap.Time("timestamp", record.Timestamp),
-						zap.Error(err),
-					)
-				}
-				config.Logger.Debug("Consumed", zap.ByteString("value", record.Value))
-				for _, event := range notificationInfo.Records {
+	go func(notificationInfoCh chan<- notification.Info) {
+		defer cl.Close()
+		defer close(notificationInfoCh)
+
+		for {
+			fetches := cl.PollFetches(ctx)
+			if errs := fetches.Errors(); len(errs) > 0 {
+				config.Logger.Fatal("Non-retryable consumer error",
+					zap.String("errors", fmt.Sprint(errs)),
+				)
+			}
+
+			fetches.EachPartition(func(p kgo.FetchTopicPartition) {
+				// We can even use a second callback!
+				p.EachRecord(func(record *kgo.Record) {
+					var notificationInfo notification.Info
+					err := json.Unmarshal(record.Value, &notificationInfo)
+					if err != nil {
+						// We'd need to export a counter here if we want to skip over unrecognized events
+						// Instead we crashloop and an admin must set a new consumer group offset
+						config.Logger.Fatal("Failed to unmarshal notification",
+							zap.String("topic", record.Topic),
+							zap.Int32("partition", record.Partition),
+							zap.ByteString("key", record.Key),
+							zap.ByteString("value", record.Value),
+							zap.Time("timestamp", record.Timestamp),
+							zap.Error(err),
+						)
+					}
+					if len(notificationInfo.Records) == 0 {
+						config.Logger.Error("Got notification with zero records",
+							zap.String("topic", record.Topic),
+							zap.Int32("partition", record.Partition),
+							zap.ByteString("key", record.Key),
+							zap.ByteString("value", record.Value),
+							zap.Time("timestamp", record.Timestamp),
+						)
+					}
 					config.Logger.Info("Got notification",
 						zap.String("topic", record.Topic),
 						zap.Int32("partition", record.Partition),
 						zap.ByteString("key", record.Key),
 						zap.Time("timestamp", record.Timestamp),
-						zap.String("bucket", event.S3.Bucket.Name),
-						zap.String("path", event.S3.Object.Key),
 					)
-				}
+					notificationInfoCh <- notificationInfo
+				})
 			})
-		})
-	}
+		}
+	}(ch)
+
+	// Returns the notification info channel, for caller to start reading from.
+	return ch
 
 }

@@ -1,5 +1,5 @@
-#!/bin/sh
-set -e
+#!/bin/bash
+set -eo pipefail
 [ -z "$DEBUG" ] || set -x
 
 # Used to be 10, probably because docker hub automated builds were low on resources

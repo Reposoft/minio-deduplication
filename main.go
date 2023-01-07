@@ -16,6 +16,7 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/minio/minio-go/v7/pkg/notification"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -273,21 +274,21 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 	assertBucketExists(ctx, archive, minioClient, logger)
 	logger.Info("Bucket existence confirmed", zap.String("inbox", inbox), zap.String("archive", archive))
 
+	var listenCh <-chan notification.Info
 	if kafkaEnable == "on" {
-		kafka.NewKafka(ctx, &kafka.KafkaConsumerConfig{
+		logger.Info("Starting kafka bucket notifications listener")
+		listenCh = kafka.NewKafka(ctx, &kafka.KafkaConsumerConfig{
 			Logger:        logger,
 			Bootstrap:     strings.Split(kafkaBootstrap, ","),
 			Topics:        []string{kafkaTopic},
 			ConsumerGroup: getConsumerGroupName(logger),
 		})
 	} else {
-		logger.Fatal("Currently testing with Kafka only")
+		logger.Info("Starting standalone bucket notifications listener", zap.String("kafkaEnable", kafkaEnable))
+		listenCh = minioClient.ListenBucketNotification(ctx, inbox, "", "", []string{
+			"s3:ObjectCreated:Put",
+		})
 	}
-
-	logger.Info("Starting bucket notifications listener")
-	listenCh := minioClient.ListenBucketNotification(ctx, inbox, "", "", []string{
-		"s3:ObjectCreated:*",
-	})
 
 	logger.Info("Listing existing inbox objects")
 	objectCh := minioClient.ListObjects(ctx, inbox, minio.ListObjectsOptions{
@@ -327,7 +328,7 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 			)
 			key := record.S3.Object.Key
 			if record.S3.Bucket.Name != inbox {
-				logger.Error("Unexpected notification bucket. Ignoring.",
+				logger.Debug("Unexpected notification bucket. Ignoring.",
 					zap.String("name", record.S3.Bucket.Name),
 					zap.String("expected", inbox))
 				ignoredUnexpectedBucket.Inc()

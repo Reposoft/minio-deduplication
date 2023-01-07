@@ -1,5 +1,5 @@
-#!/bin/sh
-set -e
+#!/bin/bash
+set -eo pipefail
 [ -z "$DEBUG" ] || set -x
 
 # This test is to make sure that we don't trim leading zeroes
