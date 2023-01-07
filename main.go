@@ -274,11 +274,25 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 		minioClient.TraceOn(os.Stderr)
 	}
 
-	assertBucketExists(ctx, inbox, minioClient, logger)
-	assertBucketExists(ctx, archive, minioClient, logger)
-	logger.Info("Bucket existence confirmed", zap.String("inbox", inbox), zap.String("archive", archive))
+	// Notification options differ in these regards:
+	// - When to wait for bucket existence
+	waitForBucketExistence := func() {
+		assertBucketExists(ctx, inbox, minioClient, logger)
+		assertBucketExists(ctx, archive, minioClient, logger)
+		logger.Info("Bucket existence confirmed", zap.String("inbox", inbox), zap.String("archive", archive))
+	}
+	// - Whether to url decode keys
+	urldecodeKeys := false
+	// - What to do with existing items
+	handleExistingItem := func(object minio.ObjectInfo) {
+		logger.Info("Existing inbox object to be transferred", zap.String("key", object.Key))
+		transfersStarted.With(prometheus.Labels{"trigger": "listing"}).Inc()
+		transfer(ctx, uploaded{
+			Key: object.Key,
+			Ext: toExtension(object.Key),
+		}, minioClient, logger)
+	}
 
-	urldecodeKeys := true
 	var listenCh <-chan notification.Info
 	if kafkaBootstrap != "" {
 		logger.Info("Starting kafka bucket notifications listener")
@@ -299,10 +313,16 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 			}
 		}
 		listenCh = kafka.NewKafka(ctx, config)
+		waitForBucketExistence()
+		urldecodeKeys = true // https://github.com/minio/minio/issues/7665#issuecomment-493681445
+		handleExistingItem = func(object minio.ObjectInfo) {
+			logger.Warn("Ignoring existing item, expecting a consumer group offset prior to upload",
+				zap.String("key", object.Key),
+			)
+		}
 	} else {
-		// Not true for standalone notifications, it seems: https://github.com/minio/minio/issues/7665#issuecomment-493681445
-		urldecodeKeys = false
-		logger.Info("Starting standalone bucket notifications listener", zap.String("kafkaEnable", kafkaEnable))
+		waitForBucketExistence()
+		logger.Info("Starting standalone bucket notifications listener")
 		listenCh = minioClient.ListenBucketNotification(ctx, inbox, "", "", []string{
 			"s3:ObjectCreated:Put",
 		})
@@ -316,12 +336,7 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 		if object.Err != nil {
 			logger.Fatal("List object error", zap.Error(object.Err))
 		}
-		logger.Info("Existing inbox object to be transferred", zap.String("key", object.Key))
-		transfersStarted.With(prometheus.Labels{"trigger": "listing"}).Inc()
-		transfer(ctx, uploaded{
-			Key: object.Key,
-			Ext: toExtension(object.Key),
-		}, minioClient, logger)
+		handleExistingItem(object)
 	}
 
 	for notificationInfo := range listenCh {

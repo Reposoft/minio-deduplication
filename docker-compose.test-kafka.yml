@@ -3,7 +3,7 @@ services:
   # Overrides for docker-compose.test.yml
 
   kafka:
-    image: &redpanda vectorized/redpanda:v22.3.9@sha256:faa195849019842bd024fc1a42738698670f31902b4fd4325be35780c2ef492f
+    image: &redpanda vectorized/redpanda:v22.3.10@sha256:dc1f47dcc592857ea7831e2a28829ebca95a9cd350d6e6374a98414866b62c6f
     entrypoint:
     - /usr/bin/rpk
     - redpanda

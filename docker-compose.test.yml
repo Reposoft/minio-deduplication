@@ -6,6 +6,8 @@ services:
     command:
     - server
     - /data
+    environment:
+      MINIO_PROMETHEUS_AUTH_TYPE: public
     expose:
     - 9000
     mem_limit: 60000000
