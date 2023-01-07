@@ -10,7 +10,7 @@ function onerr {
 trap onerr ERR
 
 # If we tweak kafka client config we can probably be faster
-[ -n "$ACCEPTABLE_TRANSFER_DELAY" ] || export ACCEPTABLE_TRANSFER_DELAY=11
+[ -n "$ACCEPTABLE_TRANSFER_DELAY" ] || export ACCEPTABLE_TRANSFER_DELAY=2
 
 sleep 1
 

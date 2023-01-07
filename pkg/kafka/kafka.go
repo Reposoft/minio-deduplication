@@ -1,8 +1,10 @@
 package kafka
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"time"
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/minio/minio-go/v7/pkg/notification"
@@ -11,11 +13,30 @@ import (
 	"go.uber.org/zap"
 )
 
+type MessageFilter struct {
+	KeyPrefix string
+}
+
 type KafkaConsumerConfig struct {
 	Logger        *zap.Logger
 	Bootstrap     []string
 	Topics        []string
 	ConsumerGroup string
+	FetchMaxWait  time.Duration
+	Filter        MessageFilter
+}
+
+func NewFilterPredicate(config MessageFilter, logger *zap.Logger) func(record *kgo.Record) bool {
+	if config.KeyPrefix == "" {
+		return func(record *kgo.Record) bool {
+			return true
+		}
+	}
+	prefix := []byte(config.KeyPrefix)
+	logger.Info("Message filter enabled on key", zap.ByteString("prefix", prefix))
+	return func(record *kgo.Record) bool {
+		return bytes.HasPrefix(record.Key, prefix)
+	}
 }
 
 func NewKafka(ctx context.Context, config *KafkaConsumerConfig) <-chan notification.Info {
@@ -26,6 +47,7 @@ func NewKafka(ctx context.Context, config *KafkaConsumerConfig) <-chan notificat
 		kgo.SeedBrokers(config.Bootstrap...),
 		kgo.ConsumerGroup(config.ConsumerGroup),
 		kgo.ConsumeTopics(config.Topics...),
+		kgo.FetchMaxWait(config.FetchMaxWait),
 	)
 	if err != nil {
 		config.Logger.Fatal("Kafka client failure",
@@ -35,6 +57,8 @@ func NewKafka(ctx context.Context, config *KafkaConsumerConfig) <-chan notificat
 			zap.Error(err),
 		)
 	}
+
+	filter := NewFilterPredicate(config.Filter, config.Logger)
 
 	// https://github.com/minio/minio-go/blob/v7.0.46/api-bucket-notification.go#L209
 	json := jsoniter.ConfigCompatibleWithStandardLibrary
@@ -56,9 +80,17 @@ func NewKafka(ctx context.Context, config *KafkaConsumerConfig) <-chan notificat
 			fetches.EachPartition(func(p kgo.FetchTopicPartition) {
 				// We can even use a second callback!
 				p.EachRecord(func(record *kgo.Record) {
+					if !filter(record) {
+						config.Logger.Debug("Filtered out",
+							zap.String("topic", record.Topic),
+							zap.Int32("partition", record.Partition),
+							zap.ByteString("key", record.Key),
+							zap.Time("timestamp", record.Timestamp),
+							zap.Error(err),
+						)
+						return
+					}
 					var notificationInfo notification.Info
-					// TODO When running in shared topics we might want to whitelist buckets
-					// for which we do json deserialization (and filter on record key first)
 					err := json.Unmarshal(record.Value, &notificationInfo)
 					if err != nil {
 						// We'd need to export a counter here if we want to skip over unrecognized events

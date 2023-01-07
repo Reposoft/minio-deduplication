@@ -23,7 +23,7 @@ services:
     image: *redpanda
     links:
     - kafka
-    entrypoint: &topic-create
+    entrypoint:
     - /bin/bash
     - -cex
     - |
@@ -37,15 +37,18 @@ services:
     - kafka
     depends_on:
     - kafka-topic-client
-    environment: &minio-kafka-env
+    environment:
       MINIO_NOTIFY_KAFKA_ENABLE: "on"
-      MINIO_NOTIFY_KAFKA_BROKERS: kafka:9092
+      MINIO_NOTIFY_KAFKA_BROKERS: &bootstrap kafka:9092
       MINIO_NOTIFY_KAFKA_TOPIC: *topicname
-      # Not required for minio, but for app
-      MINIO_NOTIFY_KAFKA_CONSUMER_GROUP: "app0"
 
   app0:
     depends_on:
     - minio0
     - kafka
-    environment: *minio-kafka-env
+    environment:
+      KAFKA_BOOTSTRAP: *bootstrap
+      KAFKA_TOPIC: *topicname
+      KAFKA_CONSUMER_GROUP: "app0"
+      KAFKA_FETCH_MAX_WAIT: 500ms
+      KAFKA_KEY_FILTER_PREFIX: bucket.write/

@@ -43,10 +43,13 @@ var (
 	secretkey               string
 	metrics                 string
 	trace                   bool
-	kafkaEnable             = os.Getenv("MINIO_NOTIFY_KAFKA_ENABLE")
-	kafkaBootstrap          = os.Getenv("MINIO_NOTIFY_KAFKA_BROKERS")
-	kafkaTopic              = os.Getenv("MINIO_NOTIFY_KAFKA_TOPIC")
-	kafkaConsumerGroup      = os.Getenv("MINIO_NOTIFY_KAFKA_CONSUMER_GROUP")
+	kafkaBootstrap          = os.Getenv("KAFKA_BOOTSTRAP")
+	kafkaTopic              = os.Getenv("KAFKA_TOPIC")
+	kafkaConsumerGroup      = os.Getenv("KAFKA_CONSUMER_GROUP")
+	kafkaKeyFilterPrefix    = os.Getenv("KAFKA_KEY_FILTER_PREFIX")
+	kafkaFetchMaxWait       = os.Getenv("KAFKA_FETCH_MAX_WAIT")
+	kafkaFetchMaxWaitDef, _ = time.ParseDuration("1s") // Default is 5 s which will keep users waiting quite a bit, https://github.com/twmb/franz-go/blob/v1.11.0/pkg/kgo/config.go#L1096
+
 	ignoredUnexpectedBucket = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "blobs_ignored_unexpected_bucket",
 		Help: "The number of notifications ignored because the bucket didn't match the requested name",
@@ -277,14 +280,25 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 
 	urldecodeKeys := true
 	var listenCh <-chan notification.Info
-	if kafkaEnable == "on" {
+	if kafkaBootstrap != "" {
 		logger.Info("Starting kafka bucket notifications listener")
-		listenCh = kafka.NewKafka(ctx, &kafka.KafkaConsumerConfig{
+		config := &kafka.KafkaConsumerConfig{
 			Logger:        logger,
 			Bootstrap:     strings.Split(kafkaBootstrap, ","),
 			Topics:        []string{kafkaTopic},
 			ConsumerGroup: getConsumerGroupName(logger),
-		})
+			Filter: kafka.MessageFilter{
+				KeyPrefix: kafkaKeyFilterPrefix,
+			},
+			FetchMaxWait: kafkaFetchMaxWaitDef,
+		}
+		if kafkaFetchMaxWait != "" {
+			config.FetchMaxWait, err = time.ParseDuration(kafkaFetchMaxWait)
+			if err != nil {
+				logger.Fatal("Failed to parse FetchMaxWait config", zap.String("value", kafkaFetchMaxWait))
+			}
+		}
+		listenCh = kafka.NewKafka(ctx, config)
 	} else {
 		// Not true for standalone notifications, it seems: https://github.com/minio/minio/issues/7665#issuecomment-493681445
 		urldecodeKeys = false
