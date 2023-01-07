@@ -1,4 +1,4 @@
-FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.17.4-bullseye
+FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.19.4-bullseye
 
 WORKDIR /workspace/source
 
@@ -7,8 +7,7 @@ RUN go mod download
 
 COPY . .
 
-# See test.sh
-#RUN go test
+RUN go test ./...
 
 RUN sed -i 's/zap.NewDevelopment()/zap.NewProduction()/' main.go
 
@@ -19,6 +18,6 @@ RUN GOOS=$TARGETOS GOARCH=$TARGETARCH \
 
 FROM --platform=${TARGETPLATFORM:-linux/amd64} gcr.io/distroless/static-debian11:nonroot
 
-COPY --from=0 /workspace/source/v1 /usr/local/bin/v1
+COPY --from=0 /workspace/source/minio-deduplication /usr/local/bin/minio-deduplication
 
-ENTRYPOINT ["v1"]
+ENTRYPOINT ["minio-deduplication"]

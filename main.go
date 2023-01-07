@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,6 +22,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"go.uber.org/zap"
+
+	"repos.se/minio-deduplication/v2/pkg/metadata"
 )
 
 type uploaded struct {
@@ -140,9 +141,6 @@ func transfer(ctx context.Context, blob uploaded, minioClient *minio.Client, log
 
 	blobDir := sha256hex[0:2] + "/" + sha256hex[2:4] + "/"
 	blobName := fmt.Sprintf("%s%s%s", blobDir, sha256hex, blob.Ext)
-	downloadName := filepath.Base(blob.Key)
-
-	meta := make(map[string]string)
 
 	existing, err := minioClient.StatObject(ctx, archive, blobName, minio.StatObjectOptions{})
 	if err != nil {
@@ -164,28 +162,20 @@ func transfer(ctx context.Context, blob uploaded, minioClient *minio.Client, log
 		duplicates.Inc()
 	}
 
-	srcMeta := objectInfo.UserMetadata
-	for k, v := range srcMeta {
-		logger.Info("Transferring meta", zap.String(k, v))
-		meta[k] = v
+	meta := metadata.NewMetadataNext(objectInfo, existing)
+
+	// temp, based on an old todo, can probably be removed
+	if meta.UserMetadata["content-disposition"] == "" {
+		logger.Fatal("expected a content-disposition header")
 	}
 
-	meta["content-type"] = objectInfo.ContentType
-	meta["content-disposition"] = mime.FormatMediaType("attachment", map[string]string{"filename": downloadName})
-	uploaddir := filepath.Dir(blob.Key)
-	if uploaddir != "." {
-		meta["X-Amz-Meta-Uploaddir"] = uploaddir + "/"
-	}
 	dst := minio.CopyDestOptions{
 		Bucket:          archive,
 		Object:          blobName,
-		UserMetadata:    meta,
-		ReplaceMetadata: true,
+		UserMetadata:    meta.UserMetadata,
+		ReplaceMetadata: meta.ReplaceMetadata,
 	}
 
-	// TODO content disposition
-
-	// Copy object call
 	uploadInfo, err := minioClient.CopyObject(ctx, dst, src)
 	if err != nil {
 		logger.Error("Failed to transfer",

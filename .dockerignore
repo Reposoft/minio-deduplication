@@ -1,3 +1,4 @@
-v1
-docker-compose.yml
-tests
+*
+!go.*
+!*.go
+!pkg
