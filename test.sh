@@ -22,3 +22,5 @@ for TEST in \
   docker-compose $TEST down --remove-orphans -v
   [ $RESULT -eq 0 ] || exit $RESULT 
 done 
+
+echo "=> All tests exited 0"
