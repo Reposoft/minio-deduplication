@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -274,6 +275,7 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 	assertBucketExists(ctx, archive, minioClient, logger)
 	logger.Info("Bucket existence confirmed", zap.String("inbox", inbox), zap.String("archive", archive))
 
+	urldecodeKeys := true
 	var listenCh <-chan notification.Info
 	if kafkaEnable == "on" {
 		logger.Info("Starting kafka bucket notifications listener")
@@ -284,6 +286,8 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 			ConsumerGroup: getConsumerGroupName(logger),
 		})
 	} else {
+		// Not true for standalone notifications, it seems: https://github.com/minio/minio/issues/7665#issuecomment-493681445
+		urldecodeKeys = false
 		logger.Info("Starting standalone bucket notifications listener", zap.String("kafkaEnable", kafkaEnable))
 		listenCh = minioClient.ListenBucketNotification(ctx, inbox, "", "", []string{
 			"s3:ObjectCreated:Put",
@@ -323,13 +327,21 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 			)
 		}
 		for _, record := range notificationInfo.Records {
-			logger.Info("Notification",
-				zap.Any("record", record),
-			)
 			key := record.S3.Object.Key
-			if record.S3.Bucket.Name != inbox {
-				logger.Debug("Unexpected notification bucket. Ignoring.",
-					zap.String("name", record.S3.Bucket.Name),
+			if urldecodeKeys {
+				key, err = url.QueryUnescape(key)
+				if err != nil {
+					logger.Fatal("Url decoding failed", zap.String("key", key), zap.Error(err))
+				}
+			}
+			bucket := record.S3.Bucket.Name
+			logger.Info("Notification record",
+				zap.String("bucket", bucket),
+				zap.String("key", key),
+			)
+			if bucket != inbox {
+				logger.Error("Unexpected notification bucket. Ignoring.",
+					zap.String("name", bucket),
 					zap.String("expected", inbox))
 				ignoredUnexpectedBucket.Inc()
 				continue

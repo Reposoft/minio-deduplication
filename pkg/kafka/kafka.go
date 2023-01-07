@@ -57,6 +57,8 @@ func NewKafka(ctx context.Context, config *KafkaConsumerConfig) <-chan notificat
 				// We can even use a second callback!
 				p.EachRecord(func(record *kgo.Record) {
 					var notificationInfo notification.Info
+					// TODO When running in shared topics we might want to whitelist buckets
+					// for which we do json deserialization (and filter on record key first)
 					err := json.Unmarshal(record.Value, &notificationInfo)
 					if err != nil {
 						// We'd need to export a counter here if we want to skip over unrecognized events
