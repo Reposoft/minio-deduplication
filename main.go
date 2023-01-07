@@ -23,6 +23,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"repos.se/minio-deduplication/v2/pkg/kafka"
 	"repos.se/minio-deduplication/v2/pkg/metadata"
 )
 
@@ -40,6 +41,10 @@ var (
 	secretkey               string
 	metrics                 string
 	trace                   bool
+	kafkaEnable             = os.Getenv("MINIO_NOTIFY_KAFKA_ENABLE")
+	kafkaBootstrap          = os.Getenv("MINIO_NOTIFY_KAFKA_BROKERS")
+	kafkaTopic              = os.Getenv("MINIO_NOTIFY_KAFKA_TOPIC")
+	kafkaConsumerGroup      = os.Getenv("MINIO_NOTIFY_KAFKA_CONSUMER_GROUP")
 	ignoredUnexpectedBucket = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "blobs_ignored_unexpected_bucket",
 		Help: "The number of notifications ignored because the bucket didn't match the requested name",
@@ -71,6 +76,24 @@ func init() {
 	flag.StringVar(&metrics, "metrics", ":2112", "bind metrics server to")
 	flag.BoolVar(&trace, "trace", false, "Enable minio client tracing")
 	flag.Parse()
+}
+
+func getConsumerGroupName(logger *zap.Logger) string {
+	if kafkaConsumerGroup != "" {
+		return kafkaConsumerGroup
+	}
+	namespace := os.Getenv("POD_NAMESPACE")
+	if namespace != "" {
+		name := fmt.Sprintf("minio-deduplication.%s", namespace)
+		logger.Info("Consumer group name not configured, used namespace to guess", zap.String("name", name))
+		return name
+	}
+	host := os.Getenv("HOST")
+	if host == "" {
+		logger.Fatal("Consumer group required but not set, and no HOST env")
+	}
+	logger.Info("Consumer group name not configured, used hostname to guess", zap.String("name", host))
+	return host
 }
 
 func assertBucketExists(ctx context.Context, name string, minioClient *minio.Client, logger *zap.Logger) {
@@ -249,6 +272,17 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 	assertBucketExists(ctx, inbox, minioClient, logger)
 	assertBucketExists(ctx, archive, minioClient, logger)
 	logger.Info("Bucket existence confirmed", zap.String("inbox", inbox), zap.String("archive", archive))
+
+	if kafkaEnable == "on" {
+		kafka.NewKafka(ctx, &kafka.KafkaConsumerConfig{
+			Logger:        logger,
+			Bootstrap:     strings.Split(kafkaBootstrap, ","),
+			Topics:        []string{kafkaTopic},
+			ConsumerGroup: getConsumerGroupName(logger),
+		})
+	} else {
+		logger.Fatal("Currently testing with Kafka only")
+	}
 
 	logger.Info("Starting bucket notifications listener")
 	listenCh := minioClient.ListenBucketNotification(ctx, inbox, "", "", []string{

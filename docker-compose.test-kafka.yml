@@ -16,12 +16,14 @@ services:
     - --node-id=0
     - --kafka-addr=PLAINTEXT://kafka:9092
     - --advertise-kafka-addr=PLAINTEXT://kafka:9092
+    - --default-log-level=warn
+    - --logger-log-level=storage=info
 
   kafka-topic-client:
     image: *redpanda
     links:
     - kafka
-    entrypoint:
+    entrypoint: &topic-create
     - /bin/bash
     - -cex
     - |
@@ -33,10 +35,14 @@ services:
   minio0:
     links:
     - kafka
+    depends_on:
+    - kafka-topic-client
     environment: &minio-kafka-env
       MINIO_NOTIFY_KAFKA_ENABLE: "on"
       MINIO_NOTIFY_KAFKA_BROKERS: kafka:9092
       MINIO_NOTIFY_KAFKA_TOPIC: *topicname
+      # Not required for minio, but for app
+      MINIO_NOTIFY_KAFKA_CONSUMER_GROUP: "app0"
 
   app0:
     depends_on:

@@ -2,6 +2,9 @@
 set -e
 [ -z "$DEBUG" ] || set -x
 
+# Used to be 10, probably because docker hub automated builds were low on resources
+[ -n "$RETRIES" ] || RETRIES=3
+
 curl -f --retry 3 --retry-connrefused http://app0:2112/metrics > /dev/null
 
 retrywait=0
@@ -9,6 +12,9 @@ until mc --no-color config host add minio0 http://minio0:9000 $MINIO_ACCESS_KEY 
   do [ $(( retrywait++ )) -lt 30 ]; sleep 1; done
 
 mc --no-color mb minio0/bucket.write
+
+mc event add minio0/bucket.write arn:minio:sqs::_:kafka --event put || \
+  [ -z "$REQUIRE_KAFKA" ] || exit 1
 
 echo "Added before watch" > test1.txt
 mc --no-color cp --attr "Content-Type=text/testing1" test1.txt minio0/bucket.write/
@@ -21,7 +27,7 @@ dir=${hash:0:2}/${hash:2:2}/
 expected=minio0/bucket.read/$dir$hash.txt
 retrywait=0
 until mc --no-color stat "$expected"; \
-  do [ $(( retrywait++ )) -lt 10 ]; sleep 1; done
+  do [ $(( retrywait++ )) -lt $RETRIES ]; sleep 1; done
 mc --no-color stat --json "$expected" | grep '"Content-Type":"text/testing1"'
 
 mc --no-color ls minio0/bucket.write
@@ -35,7 +41,7 @@ dir=${hash:0:2}/${hash:2:2}/
 expected=minio0/bucket.read/$dir$hash.txt
 retrywait=0
 until mc --no-color stat "$expected"; \
-  do [ $(( retrywait++ )) -lt 10 ]; sleep 1; done
+  do [ $(( retrywait++ )) -lt $RETRIES ]; sleep 1; done
 
 echo "Metrics: "
 curl -s http://app0:2112/metrics | grep 'blobs_'
