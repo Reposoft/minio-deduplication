@@ -51,4 +51,3 @@ services:
       KAFKA_TOPIC: *topicname
       KAFKA_CONSUMER_GROUP: "app0"
       KAFKA_FETCH_MAX_WAIT: 500ms
-      KAFKA_KEY_FILTER_PREFIX: bucket.write/

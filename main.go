@@ -46,7 +46,6 @@ var (
 	kafkaBootstrap          = os.Getenv("KAFKA_BOOTSTRAP")
 	kafkaTopic              = os.Getenv("KAFKA_TOPIC")
 	kafkaConsumerGroup      = os.Getenv("KAFKA_CONSUMER_GROUP")
-	kafkaKeyFilterPrefix    = os.Getenv("KAFKA_KEY_FILTER_PREFIX")
 	kafkaFetchMaxWait       = os.Getenv("KAFKA_FETCH_MAX_WAIT")
 	kafkaFetchMaxWaitDef, _ = time.ParseDuration("1s") // Default is 5 s which will keep users waiting quite a bit, https://github.com/twmb/franz-go/blob/v1.11.0/pkg/kgo/config.go#L1096
 
@@ -302,7 +301,7 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 			Topics:        []string{kafkaTopic},
 			ConsumerGroup: getConsumerGroupName(logger),
 			Filter: kafka.MessageFilter{
-				KeyPrefix: kafkaKeyFilterPrefix,
+				KeyPrefix: fmt.Sprintf("%s/", inbox),
 			},
 			FetchMaxWait: kafkaFetchMaxWaitDef,
 		}
