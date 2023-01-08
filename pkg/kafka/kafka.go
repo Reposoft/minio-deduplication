@@ -53,23 +53,6 @@ func NewFilterPredicate(config MessageFilter, logger *zap.Logger) func(record *k
 }
 
 func NewKafka(ctx context.Context, config *KafkaConsumerConfig) <-chan notification.Info {
-	// One client can both produce and consume!
-	// Consuming can either be direct (no consumer group), or through a group. Below, we use a group.
-	cl, err := kgo.NewClient(
-		kgo.WithLogger(kzap.New(config.Logger)),
-		kgo.SeedBrokers(config.Bootstrap...),
-		kgo.ConsumerGroup(config.ConsumerGroup),
-		kgo.ConsumeTopics(config.Topics...),
-		kgo.FetchMaxWait(config.FetchMaxWait),
-	)
-	if err != nil {
-		config.Logger.Fatal("Kafka client failure",
-			zap.Strings("bootstrap", config.Bootstrap),
-			zap.Strings("topics", config.Topics),
-			zap.String("group", config.ConsumerGroup),
-			zap.Error(err),
-		)
-	}
 
 	filter := NewFilterPredicate(config.Filter, config.Logger)
 
@@ -79,6 +62,21 @@ func NewKafka(ctx context.Context, config *KafkaConsumerConfig) <-chan notificat
 	ch := make(chan notification.Info)
 
 	go func(notificationInfoCh chan<- notification.Info) {
+		cl, err := kgo.NewClient(
+			kgo.WithLogger(kzap.New(config.Logger)),
+			kgo.SeedBrokers(config.Bootstrap...),
+			kgo.ConsumerGroup(config.ConsumerGroup),
+			kgo.ConsumeTopics(config.Topics...),
+			kgo.FetchMaxWait(config.FetchMaxWait),
+		)
+		if err != nil {
+			config.Logger.Fatal("Kafka client failure",
+				zap.Strings("bootstrap", config.Bootstrap),
+				zap.Strings("topics", config.Topics),
+				zap.String("group", config.ConsumerGroup),
+				zap.Error(err),
+			)
+		}
 		defer cl.Close()
 		defer close(notificationInfoCh)
 

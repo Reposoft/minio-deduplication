@@ -315,7 +315,7 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 		waitForBucketExistence()
 		urldecodeKeys = true // https://github.com/minio/minio/issues/7665#issuecomment-493681445
 		handleExistingItem = func(object minio.ObjectInfo) {
-			logger.Warn("Ignoring existing item, expecting a consumer group offset prior to upload",
+			logger.Warn("Existing ignored; consumer offsets should track prior uploads",
 				zap.String("key", object.Key),
 			)
 		}
