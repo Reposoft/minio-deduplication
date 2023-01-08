@@ -76,18 +76,12 @@ func TestAcks(t *testing.T) {
 	info1ptr2 := &info1
 	record1 := kgo.Record{}
 	record1ptr1 := &record1
-	p1 := kafka.KafkaAckPending{
-		Info:   info1ptr1,
-		Record: record1ptr1,
-	}
+	p1 := kafka.NewKafkaAckPending(info1ptr1, record1ptr1)
 	acks.Expect(p1)
 
 	info2 := newInfo()
 	record2 := kgo.Record{}
-	p2 := kafka.KafkaAckPending{
-		Info:   &info2,
-		Record: &record2,
-	}
+	p2 := kafka.NewKafkaAckPending(&info2, &record2)
 	acks.Expect(p2)
 
 	if acks.PendingSize() != 2 {

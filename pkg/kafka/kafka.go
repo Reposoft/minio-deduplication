@@ -30,8 +30,8 @@ type KafkaConsumerConfig struct {
 }
 
 type KafkaAckPending struct {
-	Info   *notification.Info
-	Record *kgo.Record
+	info   *notification.Info
+	record *kgo.Record
 }
 
 type KafkaAcks struct {
@@ -65,7 +65,18 @@ func NewFilterPredicate(config MessageFilter, logger *zap.Logger) func(record *k
 	}
 }
 
+func NewKafkaAckPending(info *notification.Info, record *kgo.Record) KafkaAckPending {
+	return KafkaAckPending{
+		info:   info,
+		record: record,
+	}
+}
+
 func NewKafkaAcks(logger *zap.Logger, metricPending prometheus.Gauge) *KafkaAcks {
+	logger.Info("(for performance logging) sample duration log entries",
+		zap.Duration("5ms", time.Duration(time.Millisecond*5)),
+		zap.Duration("3s2µs", time.Duration(time.Second*3+time.Microsecond*2)),
+	)
 	return &KafkaAcks{
 		logger:        logger,
 		metricPending: metricPending,
@@ -82,10 +93,10 @@ func (a *KafkaAcks) SetClientCommit(commit func(context.Context, ...*kgo.Record)
 }
 
 func (a *KafkaAcks) Expect(p KafkaAckPending) {
-	if p.Info == nil {
+	if p.info == nil {
 		a.logger.Fatal("Refusing to record pending with nil info")
 	}
-	if p.Record == nil {
+	if p.record == nil {
 		a.logger.Fatal("Refusing to record pending with nil record")
 	}
 	// a.uniqueId(p.Info) // verify compatibility, currently unsupported for unit tests
@@ -111,15 +122,15 @@ func (a *KafkaAcks) lookup(info *notification.Info) (int, KafkaAckPending) {
 		a.logger.Fatal("Ack requested but there are no pending records")
 	}
 	for i, p := range a.pending {
-		if p.Info == info { // used by unit test
+		if p.info == info { // used by unit test
 			return i, p
 		}
-		if a.uniqueId(p.Info) == a.uniqueId(info) {
+		if a.uniqueId(p.info) == a.uniqueId(info) {
 			return i, p
 		}
 		a.logger.Warn("Fifo order pending lookup failed",
-			zap.Any(fmt.Sprintf("index%d", i), p.Info),
-			zap.String("infoptr", fmt.Sprintf("%p", p.Info)),
+			zap.Any(fmt.Sprintf("index%d", i), p.info),
+			zap.String("infoptr", fmt.Sprintf("%p", p.info)),
 		)
 	}
 	a.logger.Fatal("Failed to find unacked record",
@@ -141,10 +152,11 @@ func (a *KafkaAcks) Ack(ackctx context.Context, result bucket.TransferResult, in
 		a.logger.Fatal("Ack called prior to kafka client initialization")
 	}
 	pending := a.remove(info)
-	record := pending.Record
+	record := pending.record
 	if result != bucket.TransferOk {
 		a.logger.Fatal("Ack for failed transfers not implemented", zap.Any("info", info), zap.Any("record", record))
 	}
+	tcommitstart := time.Now()
 	if err := a.commitRecords(ackctx, record); err != nil {
 		a.logger.Fatal("Offset commit failed",
 			zap.String("topic", record.Topic),
@@ -154,10 +166,12 @@ func (a *KafkaAcks) Ack(ackctx context.Context, result bucket.TransferResult, in
 			zap.Error(err),
 		)
 	} else {
-		a.logger.Info("Commtting",
+		tcommit := time.Since(tcommitstart)
+		a.logger.Info("Commit",
 			zap.String("topic", record.Topic),
 			zap.Int32("partition", record.Partition),
 			zap.Int64("offset", record.Offset),
+			zap.Duration("duration", tcommit),
 		)
 	}
 	a.metricPending.Dec()
@@ -262,10 +276,7 @@ func NewKafka(ctx context.Context, config *KafkaConsumerConfig) *bucket.InboxWat
 						zap.ByteString("key", record.Key),
 						zap.Time("timestamp", record.Timestamp),
 					)
-					acks.Expect(KafkaAckPending{
-						Info:   &notificationInfo,
-						Record: record,
-					})
+					acks.Expect(NewKafkaAckPending(&notificationInfo, record))
 					notificationInfoCh <- notificationInfo
 				})
 			})

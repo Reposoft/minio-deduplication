@@ -48,7 +48,7 @@ var (
 	kafkaTopic              = os.Getenv("KAFKA_TOPIC")
 	kafkaConsumerGroup      = os.Getenv("KAFKA_CONSUMER_GROUP")
 	kafkaFetchMaxWait       = os.Getenv("KAFKA_FETCH_MAX_WAIT")
-	kafkaFetchMaxWaitDef, _ = time.ParseDuration("1s") // Default is 5 s which will keep users waiting quite a bit, https://github.com/twmb/franz-go/blob/v1.11.0/pkg/kgo/config.go#L1096
+	kafkaFetchMaxWaiDefault = time.Duration(time.Second * 1) // Default is 5 s which will keep users waiting quite a bit, https://github.com/twmb/franz-go/blob/v1.11.0/pkg/kgo/config.go#L1096
 
 	ignoredUnexpectedBucket = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "blobs_ignored_unexpected_bucket",
@@ -308,7 +308,7 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 			Filter: kafka.MessageFilter{
 				KeyPrefix: fmt.Sprintf("%s/", inbox),
 			},
-			FetchMaxWait: kafkaFetchMaxWaitDef,
+			FetchMaxWait: kafkaFetchMaxWaiDefault,
 		}
 		if kafkaFetchMaxWait != "" {
 			config.FetchMaxWait, err = time.ParseDuration(kafkaFetchMaxWait)
