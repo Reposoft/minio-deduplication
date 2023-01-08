@@ -73,6 +73,7 @@ func NewKafkaAcks(logger *zap.Logger, metricPending prometheus.Gauge) *KafkaAcks
 }
 
 func (a *KafkaAcks) SetClient(c *kgo.Client) {
+	// TODO async CommitOffsets would probably be preferrable, and would likely reduce delays in tests
 	a.SetClientCommit(c.CommitRecords)
 }
 
