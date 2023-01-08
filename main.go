@@ -25,6 +25,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"repos.se/minio-deduplication/v2/pkg/bucket"
 	"repos.se/minio-deduplication/v2/pkg/kafka"
 	"repos.se/minio-deduplication/v2/pkg/metadata"
 )
@@ -296,7 +297,7 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 		}, minioClient, logger)
 	}
 
-	var listenCh <-chan notification.Info
+	var watcher *bucket.InboxWatcher
 	if kafkaBootstrap != "" {
 		logger.Info("Starting kafka bucket notifications listener")
 		config := &kafka.KafkaConsumerConfig{
@@ -315,7 +316,7 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 				logger.Fatal("Failed to parse FetchMaxWait config", zap.String("value", kafkaFetchMaxWait))
 			}
 		}
-		listenCh = kafka.NewKafka(ctx, config)
+		watcher = kafka.NewKafka(ctx, config)
 		waitForBucketExistence()
 		urldecodeKeys = true // https://github.com/minio/minio/issues/7665#issuecomment-493681445
 		handleExistingItem = func(object minio.ObjectInfo) {
@@ -326,9 +327,18 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 	} else {
 		waitForBucketExistence()
 		logger.Info("Starting standalone bucket notifications listener")
-		listenCh = minioClient.ListenBucketNotification(ctx, inbox, "", "", []string{
-			"s3:ObjectCreated:Put",
-		})
+		watcher = &bucket.InboxWatcher{
+			Uploads: minioClient.ListenBucketNotification(ctx, inbox, "", "", []string{
+				"s3:ObjectCreated:Put",
+			}),
+			Ack: func(ackctx context.Context, tr bucket.TransferResult, i *notification.Info) {
+				if tr == bucket.TransferFailed {
+					logger.Error("Nack on transfer failure not implemented")
+				} else {
+					logger.Debug("Ack is a no-op for ListenBucketNotification")
+				}
+			},
+		}
 	}
 
 	logger.Info("Listing existing inbox objects")
@@ -342,7 +352,7 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 		handleExistingItem(object)
 	}
 
-	for notificationInfo := range listenCh {
+	for notificationInfo := range watcher.Uploads {
 		if notificationInfo.Err != nil {
 			// Can't test these failure modes with the current build infra, but we fall back to crashlooping if detection fails.
 			// If we get errors without any successful notifications we'll transfer files anyway, per the ListObjects above.
@@ -366,14 +376,14 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 					logger.Fatal("Url decoding failed", zap.String("key", key), zap.Error(err))
 				}
 			}
-			bucket := record.S3.Bucket.Name
+			bucketName := record.S3.Bucket.Name
 			logger.Info("Notification record",
-				zap.String("bucket", bucket),
+				zap.String("bucket", bucketName),
 				zap.String("key", key),
 			)
-			if bucket != inbox {
+			if bucketName != inbox {
 				logger.Error("Unexpected notification bucket. Ignoring.",
-					zap.String("name", bucket),
+					zap.String("name", bucketName),
 					zap.String("expected", inbox))
 				ignoredUnexpectedBucket.Inc()
 				continue
@@ -383,6 +393,8 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 				Key: key,
 				Ext: toExtension(key),
 			}, minioClient, logger)
+			// transfer is sync and errors are fatal so we can ack here
+			watcher.Ack(ctx, bucket.TransferOk, &notificationInfo)
 		}
 	}
 

@@ -13,6 +13,14 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/plugin/kzap"
 	"go.uber.org/zap"
+	"repos.se/minio-deduplication/v2/pkg/bucket"
+)
+
+var (
+	metricAckPending = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "blobs_watch_acks_pending",
+		Help: "Notifications emitted but not yet acked for on the consumer",
+	})
 )
 
 type MessageFilter struct {
@@ -52,25 +60,40 @@ func NewFilterPredicate(config MessageFilter, logger *zap.Logger) func(record *k
 	}
 }
 
-func NewKafka(ctx context.Context, config *KafkaConsumerConfig) <-chan notification.Info {
+func NewKafka(ctx context.Context, config *KafkaConsumerConfig) *bucket.InboxWatcher {
 
-	filter := NewFilterPredicate(config.Filter, config.Logger)
+	logger := config.Logger
+
+	filter := NewFilterPredicate(config.Filter, logger)
 
 	// https://github.com/minio/minio-go/blob/v7.0.46/api-bucket-notification.go#L209
 	json := jsoniter.ConfigCompatibleWithStandardLibrary
 
 	ch := make(chan notification.Info)
+	result := &bucket.InboxWatcher{
+		Uploads: ch,
+		Ack: func(ctx context.Context, tr bucket.TransferResult, i *notification.Info) {
+			logger.Fatal("Ack called prior to kafka client initialization")
+		},
+	}
+
+	unacked := make(map[*notification.Info]*kgo.Record)
+	ackExpect := func(info *notification.Info, record *kgo.Record) {
+		unacked[info] = record
+		logger.Info("Recorded pending ack", zap.String("ptr", fmt.Sprintf("%p", info)))
+		metricAckPending.Inc()
+	}
 
 	go func(notificationInfoCh chan<- notification.Info) {
 		cl, err := kgo.NewClient(
-			kgo.WithLogger(kzap.New(config.Logger)),
+			kgo.WithLogger(kzap.New(logger)),
 			kgo.SeedBrokers(config.Bootstrap...),
 			kgo.ConsumerGroup(config.ConsumerGroup),
 			kgo.ConsumeTopics(config.Topics...),
 			kgo.FetchMaxWait(config.FetchMaxWait),
 		)
 		if err != nil {
-			config.Logger.Fatal("Kafka client failure",
+			logger.Fatal("Kafka client failure",
 				zap.Strings("bootstrap", config.Bootstrap),
 				zap.Strings("topics", config.Topics),
 				zap.String("group", config.ConsumerGroup),
@@ -80,19 +103,44 @@ func NewKafka(ctx context.Context, config *KafkaConsumerConfig) <-chan notificat
 		defer cl.Close()
 		defer close(notificationInfoCh)
 
+		result.Ack = func(ackctx context.Context, result bucket.TransferResult, info *notification.Info) {
+			record := unacked[info]
+			if record == nil {
+				logger.Fatal("Failed to find unacked record", zap.String("ptr", fmt.Sprintf("%p", info)))
+			}
+			if result != bucket.TransferOk {
+				logger.Fatal("Ack for failed transfers not implemented", zap.Any("info", info), zap.Any("record", record))
+			}
+			if err := cl.CommitRecords(ackctx, record); err != nil {
+				logger.Fatal("Offset commit failed",
+					zap.String("topic", record.Topic),
+					zap.Int32("partition", record.Partition),
+					zap.Int64("offset", record.Offset),
+					zap.ByteString("key", record.Key),
+					zap.Error(err),
+				)
+			} else {
+				logger.Info("Commtting",
+					zap.String("topic", record.Topic),
+					zap.Int32("partition", record.Partition),
+					zap.Int64("offset", record.Offset),
+				)
+			}
+			metricAckPending.Dec()
+		}
+
 		for {
 			fetches := cl.PollFetches(ctx)
 			if errs := fetches.Errors(); len(errs) > 0 {
-				config.Logger.Fatal("Non-retryable consumer error",
+				logger.Fatal("Non-retryable consumer error",
 					zap.String("errors", fmt.Sprint(errs)),
 				)
 			}
 
 			fetches.EachPartition(func(p kgo.FetchTopicPartition) {
-				// We can even use a second callback!
 				p.EachRecord(func(record *kgo.Record) {
 					if !filter(record) {
-						config.Logger.Debug("Filtered out",
+						logger.Debug("Filtered out",
 							zap.String("topic", record.Topic),
 							zap.Int32("partition", record.Partition),
 							zap.ByteString("key", record.Key),
@@ -102,13 +150,15 @@ func NewKafka(ctx context.Context, config *KafkaConsumerConfig) <-chan notificat
 						return
 					}
 					var notificationInfo notification.Info
-					err := json.Unmarshal(record.Value, &notificationInfo)
+					notificationInfoPtr := &notificationInfo
+					err := json.Unmarshal(record.Value, notificationInfoPtr)
 					if err != nil {
 						// We'd need to export a counter here if we want to skip over unrecognized events
 						// Instead we crashloop and an admin must set a new consumer group offset
-						config.Logger.Fatal("Failed to unmarshal notification",
+						logger.Fatal("Failed to unmarshal notification",
 							zap.String("topic", record.Topic),
 							zap.Int32("partition", record.Partition),
+							zap.Int64("offset", record.Offset),
 							zap.ByteString("key", record.Key),
 							zap.ByteString("value", record.Value),
 							zap.Time("timestamp", record.Timestamp),
@@ -116,20 +166,23 @@ func NewKafka(ctx context.Context, config *KafkaConsumerConfig) <-chan notificat
 						)
 					}
 					if len(notificationInfo.Records) == 0 {
-						config.Logger.Error("Got notification with zero records",
+						logger.Error("Got notification with zero records",
 							zap.String("topic", record.Topic),
 							zap.Int32("partition", record.Partition),
+							zap.Int64("offset", record.Offset),
 							zap.ByteString("key", record.Key),
 							zap.ByteString("value", record.Value),
 							zap.Time("timestamp", record.Timestamp),
 						)
 					}
-					config.Logger.Info("Got notification",
+					logger.Info("Got notification",
 						zap.String("topic", record.Topic),
 						zap.Int32("partition", record.Partition),
+						zap.Int64("offset", record.Offset),
 						zap.ByteString("key", record.Key),
 						zap.Time("timestamp", record.Timestamp),
 					)
+					ackExpect(notificationInfoPtr, record)
 					notificationInfoCh <- notificationInfo
 				})
 			})
@@ -137,6 +190,5 @@ func NewKafka(ctx context.Context, config *KafkaConsumerConfig) <-chan notificat
 	}(ch)
 
 	// Returns the notification info channel, for caller to start reading from.
-	return ch
-
+	return result
 }

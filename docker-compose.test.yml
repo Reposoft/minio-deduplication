@@ -37,6 +37,7 @@ services:
     environment:
     - DEBUG=true
     - TESTS_DISABLED=${TESTS_DISABLED:-true}
+    - ACCEPTABLE_TRANSFER_DELAY=${ACCEPTABLE_TRANSFER_DELAY:-3}
     - MINIO_ACCESS_KEY=minioadmin
     - MINIO_SECRET_KEY=minioadmin
     entrypoint:
