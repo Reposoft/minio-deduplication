@@ -129,6 +129,10 @@ func assertBucketExists(ctx context.Context, name string, minioClient *minio.Cli
 func transfer(ctx context.Context, blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 	objectInfo, err := minioClient.StatObject(ctx, inbox, blob.Key, minio.StatObjectOptions{})
 	if err != nil {
+		// NOTE with kafka notifications we currently use the default commit behavior
+		// https://github.com/twmb/franz-go/blob/master/docs/producing-and-consuming.md#consumer-groups
+		// which means that it's likely after unclean exit that transfers happend but commit did not.
+		// The risk would be present but lower with commit immediately upon transfer.
 		logger.Fatal("Failed to stat source object",
 			zap.String("key", blob.Key),
 			zap.String("bucket", inbox),
