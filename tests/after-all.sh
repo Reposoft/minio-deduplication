@@ -15,7 +15,7 @@ echo "_____ [after-all] write bucket ls _____"
 mc ls -r minio0/bucket.write
 
 echo "_____ [after-all] topic contents  _____"
-rpk topic consume --brokers kafka:9092 minio-events -p 0 -o :end -f '%o %k: %v\n' || true
+rpk topic consume --brokers kafka:9092 minio-events -p 0 -o :end -f '%o %k %Vb\n' || true
 
 echo "_____ [after-all] consumer group  _____"
 rpk group list --brokers kafka:9092 || true
