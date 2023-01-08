@@ -16,13 +16,6 @@ import (
 	"repos.se/minio-deduplication/v2/pkg/bucket"
 )
 
-var (
-	metricAckPending = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "blobs_watch_acks_pending",
-		Help: "Notifications emitted but not yet acked for on the consumer",
-	})
-)
-
 type MessageFilter struct {
 	KeyPrefix string
 }
@@ -34,6 +27,18 @@ type KafkaConsumerConfig struct {
 	ConsumerGroup string
 	FetchMaxWait  time.Duration
 	Filter        MessageFilter
+}
+
+type KafkaAckPending struct {
+	Info   *notification.Info
+	Record *kgo.Record
+}
+
+type KafkaAcks struct {
+	logger        *zap.Logger
+	pending       []KafkaAckPending
+	commitRecords func(context.Context, ...*kgo.Record) error
+	metricPending prometheus.Gauge
 }
 
 func NewFilterPredicate(config MessageFilter, logger *zap.Logger) func(record *kgo.Record) bool {
@@ -60,11 +65,93 @@ func NewFilterPredicate(config MessageFilter, logger *zap.Logger) func(record *k
 	}
 }
 
+func NewKafkaAcks(logger *zap.Logger, metricPending prometheus.Gauge) *KafkaAcks {
+	return &KafkaAcks{
+		logger:        logger,
+		metricPending: metricPending,
+	}
+}
+
+func (a *KafkaAcks) SetClient(c *kgo.Client) {
+	a.SetClientCommit(c.CommitRecords)
+}
+
+func (a *KafkaAcks) SetClientCommit(commit func(context.Context, ...*kgo.Record) error) {
+	a.commitRecords = commit
+}
+
+func (a *KafkaAcks) Expect(p KafkaAckPending) {
+	if p.Info == nil {
+		a.logger.Fatal("Refusing to record pending with nil info")
+	}
+	if p.Record == nil {
+		a.logger.Fatal("Refusing to record pending with nil record")
+	}
+	a.pending = append(a.pending, p)
+	a.logger.Info("Recorded pending ack")
+	a.metricPending.Inc()
+}
+
+func (a *KafkaAcks) lookup(info *notification.Info) KafkaAckPending {
+	var pending KafkaAckPending
+	if len(a.pending) == 0 {
+		a.logger.Fatal("Ack requested but there are no pending records")
+	}
+	for i, p := range a.pending {
+		if p.Info == info {
+
+			return p
+		}
+		a.logger.Warn("Pending mismatch in fifo order",
+			zap.Any(fmt.Sprintf("index%d", i), p.Info),
+			zap.String("infoptr", fmt.Sprintf("%p", p.Info)),
+		)
+	}
+	a.logger.Fatal("Failed to find unacked record",
+		zap.Any("expected", info),
+		zap.String("ptr", fmt.Sprintf("%p", info)),
+	)
+	// shift
+	return pending
+}
+
+func (a *KafkaAcks) Ack(ackctx context.Context, result bucket.TransferResult, info *notification.Info) {
+	if a.commitRecords == nil {
+		a.logger.Fatal("Ack called prior to kafka client initialization")
+	}
+	pending := a.lookup(info)
+	record := pending.Record
+	if result != bucket.TransferOk {
+		a.logger.Fatal("Ack for failed transfers not implemented", zap.Any("info", info), zap.Any("record", record))
+	}
+	if err := a.commitRecords(ackctx, record); err != nil {
+		a.logger.Fatal("Offset commit failed",
+			zap.String("topic", record.Topic),
+			zap.Int32("partition", record.Partition),
+			zap.Int64("offset", record.Offset),
+			zap.ByteString("key", record.Key),
+			zap.Error(err),
+		)
+	} else {
+		a.logger.Info("Commtting",
+			zap.String("topic", record.Topic),
+			zap.Int32("partition", record.Partition),
+			zap.Int64("offset", record.Offset),
+		)
+	}
+	a.metricPending.Dec()
+}
+
 func NewKafka(ctx context.Context, config *KafkaConsumerConfig) *bucket.InboxWatcher {
 
 	logger := config.Logger
 
 	filter := NewFilterPredicate(config.Filter, logger)
+
+	acks := NewKafkaAcks(logger, promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "blobs_watch_acks_pending",
+		Help: "Notifications emitted but not yet acked for on the consumer",
+	}))
 
 	// https://github.com/minio/minio-go/blob/v7.0.46/api-bucket-notification.go#L209
 	json := jsoniter.ConfigCompatibleWithStandardLibrary
@@ -72,16 +159,7 @@ func NewKafka(ctx context.Context, config *KafkaConsumerConfig) *bucket.InboxWat
 	ch := make(chan notification.Info)
 	result := &bucket.InboxWatcher{
 		Uploads: ch,
-		Ack: func(ctx context.Context, tr bucket.TransferResult, i *notification.Info) {
-			logger.Fatal("Ack called prior to kafka client initialization")
-		},
-	}
-
-	unacked := make(map[*notification.Info]*kgo.Record)
-	ackExpect := func(info *notification.Info, record *kgo.Record) {
-		unacked[info] = record
-		logger.Info("Recorded pending ack", zap.String("ptr", fmt.Sprintf("%p", info)))
-		metricAckPending.Inc()
+		Ack:     acks.Ack,
 	}
 
 	go func(notificationInfoCh chan<- notification.Info) {
@@ -103,31 +181,8 @@ func NewKafka(ctx context.Context, config *KafkaConsumerConfig) *bucket.InboxWat
 		defer cl.Close()
 		defer close(notificationInfoCh)
 
-		result.Ack = func(ackctx context.Context, result bucket.TransferResult, info *notification.Info) {
-			record := unacked[info]
-			if record == nil {
-				logger.Fatal("Failed to find unacked record", zap.String("ptr", fmt.Sprintf("%p", info)))
-			}
-			if result != bucket.TransferOk {
-				logger.Fatal("Ack for failed transfers not implemented", zap.Any("info", info), zap.Any("record", record))
-			}
-			if err := cl.CommitRecords(ackctx, record); err != nil {
-				logger.Fatal("Offset commit failed",
-					zap.String("topic", record.Topic),
-					zap.Int32("partition", record.Partition),
-					zap.Int64("offset", record.Offset),
-					zap.ByteString("key", record.Key),
-					zap.Error(err),
-				)
-			} else {
-				logger.Info("Commtting",
-					zap.String("topic", record.Topic),
-					zap.Int32("partition", record.Partition),
-					zap.Int64("offset", record.Offset),
-				)
-			}
-			metricAckPending.Dec()
-		}
+		// We're naive w.r.t https://github.com/twmb/franz-go/blob/v1.11.0/docs/producing-and-consuming.md#offset-management
+		acks.SetClient(cl)
 
 		for {
 			fetches := cl.PollFetches(ctx)
@@ -182,7 +237,10 @@ func NewKafka(ctx context.Context, config *KafkaConsumerConfig) *bucket.InboxWat
 						zap.ByteString("key", record.Key),
 						zap.Time("timestamp", record.Timestamp),
 					)
-					ackExpect(notificationInfoPtr, record)
+					acks.Expect(KafkaAckPending{
+						Info:   &notificationInfo,
+						Record: record,
+					})
 					notificationInfoCh <- notificationInfo
 				})
 			})
