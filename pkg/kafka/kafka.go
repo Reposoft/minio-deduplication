@@ -8,6 +8,8 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/minio/minio-go/v7/pkg/notification"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/plugin/kzap"
 	"go.uber.org/zap"
@@ -33,9 +35,20 @@ func NewFilterPredicate(config MessageFilter, logger *zap.Logger) func(record *k
 		}
 	}
 	prefix := []byte(config.KeyPrefix)
+	ignoredFiltered := promauto.NewCounter(prometheus.CounterOpts{
+		Name: "blobs_ignored_filtered",
+		Help: "The number of notifications ignored the notification did not match the filter",
+		ConstLabels: prometheus.Labels{
+			"prefix": string(prefix),
+		},
+	})
 	logger.Info("Message filter enabled on key", zap.ByteString("prefix", prefix))
 	return func(record *kgo.Record) bool {
-		return bytes.HasPrefix(record.Key, prefix)
+		hit := bytes.HasPrefix(record.Key, prefix)
+		if !hit {
+			ignoredFiltered.Inc()
+		}
+		return hit
 	}
 }
 
