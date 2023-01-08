@@ -278,7 +278,7 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 		minioClient.TraceOn(os.Stderr)
 	}
 
-	// Notification options differ in these regards:
+	// These variables predate the InboxWatcher interface, and should probably be incorporated there:
 	// - When to wait for bucket existence
 	waitForBucketExistence := func() {
 		assertBucketExists(ctx, inbox, minioClient, logger)

@@ -8,6 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 	"repos.se/minio-deduplication/v2/pkg/bucket"
 	"repos.se/minio-deduplication/v2/pkg/kafka"
 )
@@ -47,7 +48,7 @@ func TestFilter(t *testing.T) {
 func TestAcks(t *testing.T) {
 
 	ctx := context.TODO()
-	logger := zap.NewNop()
+	logger := zaptest.NewLogger(t)
 	metricPending := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "test_pending",
 	})
@@ -65,7 +66,12 @@ func TestAcks(t *testing.T) {
 		return nil
 	})
 
-	info1 := notification.Info{}
+	newInfo := func() notification.Info {
+		// todo support same uniqueness check as for info at runtime (that went through channel)
+		return notification.Info{}
+	}
+
+	info1 := newInfo()
 	info1ptr1 := &info1
 	info1ptr2 := &info1
 	record1 := kgo.Record{}
@@ -76,10 +82,34 @@ func TestAcks(t *testing.T) {
 	}
 	acks.Expect(p1)
 
+	info2 := newInfo()
+	record2 := kgo.Record{}
+	p2 := kafka.KafkaAckPending{
+		Info:   &info2,
+		Record: &record2,
+	}
+	acks.Expect(p2)
+
+	if acks.PendingSize() != 2 {
+		t.Errorf("Expected 2 pending, got %d", acks.PendingSize())
+	}
+
 	acks.Ack(ctx, bucket.TransferOk, info1ptr2)
 
 	if len(commits) != 1 {
 		t.Errorf("Expected 1 captured test commit, got %d", len(commits))
+	}
+	if acks.PendingSize() != 1 {
+		t.Errorf("Expected 1 remaining pending, got %d", acks.PendingSize())
+	}
+
+	acks.Ack(ctx, bucket.TransferOk, &info2)
+
+	if len(commits) != 2 {
+		t.Errorf("Expected 2 captured test commit, got %d", len(commits))
+	}
+	if acks.PendingSize() != 0 {
+		t.Errorf("Expected 0 remaining pending, got %d", acks.PendingSize())
 	}
 
 }

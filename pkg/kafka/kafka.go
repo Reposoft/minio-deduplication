@@ -87,22 +87,36 @@ func (a *KafkaAcks) Expect(p KafkaAckPending) {
 	if p.Record == nil {
 		a.logger.Fatal("Refusing to record pending with nil record")
 	}
+	// a.uniqueId(p.Info) // verify compatibility, currently unsupported for unit tests
 	a.pending = append(a.pending, p)
 	a.logger.Info("Recorded pending ack")
 	a.metricPending.Inc()
 }
 
-func (a *KafkaAcks) lookup(info *notification.Info) KafkaAckPending {
-	var pending KafkaAckPending
+// uniqueId trusts https://github.com/minio/minio/blob/RELEASE.2023-01-06T18-11-18Z/cmd/event-notification.go#L289
+func (a *KafkaAcks) uniqueId(info *notification.Info) string {
+	if len(info.Records) != 1 {
+		a.logger.Fatal("Unsupported records", zap.Int("len", len(info.Records)), zap.Any("info", info))
+	}
+	u := info.Records[0].S3.Object.Sequencer
+	if u == "" {
+		a.logger.Fatal("Missing record uniqueness value", zap.Any("info", info))
+	}
+	return info.Records[0].S3.Object.Sequencer
+}
+
+func (a *KafkaAcks) lookup(info *notification.Info) (int, KafkaAckPending) {
 	if len(a.pending) == 0 {
 		a.logger.Fatal("Ack requested but there are no pending records")
 	}
 	for i, p := range a.pending {
-		if p.Info == info {
-
-			return p
+		if p.Info == info { // used by unit test
+			return i, p
 		}
-		a.logger.Warn("Pending mismatch in fifo order",
+		if a.uniqueId(p.Info) == a.uniqueId(info) {
+			return i, p
+		}
+		a.logger.Warn("Fifo order pending lookup failed",
 			zap.Any(fmt.Sprintf("index%d", i), p.Info),
 			zap.String("infoptr", fmt.Sprintf("%p", p.Info)),
 		)
@@ -111,15 +125,21 @@ func (a *KafkaAcks) lookup(info *notification.Info) KafkaAckPending {
 		zap.Any("expected", info),
 		zap.String("ptr", fmt.Sprintf("%p", info)),
 	)
-	// shift
-	return pending
+	return -1, KafkaAckPending{} // after fatal
+}
+
+// remove does lookup, then removes the matching item from pending
+func (a *KafkaAcks) remove(info *notification.Info) KafkaAckPending {
+	i, p := a.lookup(info)
+	a.pending = append(a.pending[:i], a.pending[i+1:]...)
+	return p
 }
 
 func (a *KafkaAcks) Ack(ackctx context.Context, result bucket.TransferResult, info *notification.Info) {
 	if a.commitRecords == nil {
 		a.logger.Fatal("Ack called prior to kafka client initialization")
 	}
-	pending := a.lookup(info)
+	pending := a.remove(info)
 	record := pending.Record
 	if result != bucket.TransferOk {
 		a.logger.Fatal("Ack for failed transfers not implemented", zap.Any("info", info), zap.Any("record", record))
@@ -140,6 +160,10 @@ func (a *KafkaAcks) Ack(ackctx context.Context, result bucket.TransferResult, in
 		)
 	}
 	a.metricPending.Dec()
+}
+
+func (a *KafkaAcks) PendingSize() int {
+	return len(a.pending)
 }
 
 func NewKafka(ctx context.Context, config *KafkaConsumerConfig) *bucket.InboxWatcher {
