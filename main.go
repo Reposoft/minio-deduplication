@@ -46,6 +46,8 @@ var (
 	trace                   bool
 	batch                   bool
 	batchmetrics            bool
+	batchmetricsWaitMax     = time.Duration(time.Minute * 1)
+	restartDelay            time.Duration
 	kafkaBootstrap          = os.Getenv("KAFKA_BOOTSTRAP")
 	kafkaTopic              = os.Getenv("KAFKA_TOPIC")
 	kafkaConsumerGroup      = os.Getenv("KAFKA_CONSUMER_GROUP")
@@ -83,7 +85,8 @@ func init() {
 	flag.StringVar(&metrics, "metrics", ":2112", "bind metrics server to")
 	flag.BoolVar(&trace, "trace", false, "Enable minio client tracing")
 	flag.BoolVar(&batch, "batch", false, "Run in batch mode: list + transfer then exit")
-	flag.BoolVar(&batchmetrics, "batchmetrics", true, "Wait for metrics scrape after batch run")
+	flag.BoolVar(&batchmetrics, "batchmetrics", false, "Wait for metrics scrape after batch run")
+	flag.DurationVar(&restartDelay, "restartdelay", time.Duration(time.Second*1), "On error restart after sleep, zero to disable restart")
 	flag.Parse()
 }
 
@@ -356,7 +359,8 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 	})
 	for object := range objectCh {
 		if object.Err != nil {
-			logger.Fatal("List object error", zap.Error(object.Err))
+			logger.Error("List object error", zap.Error(object.Err))
+			return object.Err
 		}
 		handleExistingItem(object)
 	}
@@ -437,6 +441,7 @@ func main() {
 		}
 		metricsHandler = metricsIntercept(metricsHandler, func() {
 			if batchmetricsExit {
+				logger.Info("Exiting on batch mode final metrics scrape")
 				os.Exit(0)
 			}
 		})
@@ -454,12 +459,16 @@ func main() {
 		err := mainMinio(ctx, logger)
 		if err != nil {
 			// Do we need backoff here? Maybe not while we're so specific about which error that triggers re-run.
-			logger.Info("Re-running handler", zap.Error(err))
+			if restartDelay != 0 {
+				logger.Info("Re-running handler", zap.Duration("delay", restartDelay), zap.Error(err))
+				time.Sleep(restartDelay)
+			}
 		} else if batch {
 			logger.Info("Batch mode completed")
 			if batchmetrics {
-				logger.Info("Awaiting next metrics scrape before exit")
+				logger.Info("Awaiting next metrics scrape before exit", zap.Duration("max", batchmetricsWaitMax))
 				batchmetricsExit = true
+				time.Sleep(batchmetricsWaitMax)
 			}
 			os.Exit(0)
 		} else {

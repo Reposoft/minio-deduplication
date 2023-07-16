@@ -9,9 +9,10 @@ function onerr {
 
 trap onerr ERR
 
+echo "_____ batch test start _____"
+sleep 1
 
-echo "Batch test here"
-
+basic-flow.sh
 
 echo "_____ batch test executed _____"
 after-all.sh
