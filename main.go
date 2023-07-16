@@ -415,6 +415,13 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 	return nil
 }
 
+func metricsIntercept(handler http.Handler, callback func()) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r)
+		callback()
+	})
+}
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -422,7 +429,19 @@ func main() {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
-	http.Handle("/metrics", promhttp.Handler())
+	metricsHandler := promhttp.Handler()
+	batchmetricsExit := false
+	if batchmetrics {
+		if !batch {
+			logger.Fatal("batchmetrics without batch")
+		}
+		metricsHandler = metricsIntercept(metricsHandler, func() {
+			if batchmetricsExit {
+				os.Exit(0)
+			}
+		})
+	}
+	http.Handle("/metrics", metricsHandler)
 	go func() {
 		logger.Info("Starting /metrics server", zap.String("bound", metrics))
 		err := http.ListenAndServe(metrics, nil)
@@ -436,7 +455,14 @@ func main() {
 		if err != nil {
 			// Do we need backoff here? Maybe not while we're so specific about which error that triggers re-run.
 			logger.Info("Re-running handler", zap.Error(err))
-		} else if !batch {
+		} else if batch {
+			logger.Info("Batch mode completed")
+			if batchmetrics {
+				logger.Info("Awaiting next metrics scrape before exit")
+				batchmetricsExit = true
+			}
+			os.Exit(0)
+		} else {
 			logger.Fatal("Unexpectedly exited without an error")
 		}
 	}
