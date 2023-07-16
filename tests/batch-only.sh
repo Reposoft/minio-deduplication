@@ -4,10 +4,14 @@ set -eEo pipefail
 [ "$TESTS_DISABLED" = "true" ] && echo "Tests disabled through env TESTS_DISABLED=true" && exit 0
 
 function onerr {
-  after-all.sh
+  CALLER="$(caller)"
+  LINE=$1
+  echo "^^^^^ ERR $CALLER line $LINE ^^^^^"
+  after-all.sh || true
+  echo "_____ ERR $CALLER line $LINE _____"
 }
 
-trap onerr ERR
+trap 'onerr $LINENO' ERR
 
 echo "_____ batch test start _____"
 sleep 1
