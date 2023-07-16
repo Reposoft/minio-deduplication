@@ -13,15 +13,7 @@ services:
     - --archive=bucket.read
     - --batch
     - --batchmetrics
-    deploy:
-      restart_policy:
-        condition: any
-        delay: 3s
 
   sut:
-    environment:
-    - DEBUG=true
-    - TESTS_DISABLED=${TESTS_DISABLED:-true}
-    - ACCEPTABLE_TRANSFER_DELAY=${ACCEPTABLE_TRANSFER_DELAY:-20}
-    - MINIO_ACCESS_KEY=minioadmin
-    - MINIO_SECRET_KEY=minioadmin
+    entrypoint:
+    - batch-only.sh
