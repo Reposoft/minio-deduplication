@@ -1,4 +1,5 @@
-version: '2.4'
+# yaml-language-server: $schema=https://raw.githubusercontent.com/docker/cli/v24.0.4/cli/compose/schema/data/config_schema_v3.9.json
+version: '3.9'
 services:
   # Overrides for docker-compose.test.yml
 
