@@ -1,0 +1,21 @@
+version: '2.4'
+services:
+  # Overrides for docker-compose.test.yml
+
+  app0:
+    entrypoint:
+    - /bin/sh
+    - -cex
+    command:
+    - |
+      while true; do
+        sleep 3
+        minio-deduplication \
+          --host=minio0:9000 \
+          --secure=false \
+          --accesskey=minioadmin \
+          --secretkey=minioadmin \
+          --inbox=bucket.write \
+          --archive=bucket.read \
+          --batch
+      done

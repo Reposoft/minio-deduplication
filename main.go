@@ -44,6 +44,8 @@ var (
 	secretkey               string
 	metrics                 string
 	trace                   bool
+	batch                   bool
+	batchmetrics            bool
 	kafkaBootstrap          = os.Getenv("KAFKA_BOOTSTRAP")
 	kafkaTopic              = os.Getenv("KAFKA_TOPIC")
 	kafkaConsumerGroup      = os.Getenv("KAFKA_CONSUMER_GROUP")
@@ -80,6 +82,8 @@ func init() {
 	flag.StringVar(&secretkey, "secretkey", "", "secret key")
 	flag.StringVar(&metrics, "metrics", ":2112", "bind metrics server to")
 	flag.BoolVar(&trace, "trace", false, "Enable minio client tracing")
+	flag.BoolVar(&batch, "batch", false, "Run in batch mode: list + transfer then exit")
+	flag.BoolVar(&batchmetrics, "batchmetrics", true, "Wait for metrics scrape after batch run")
 	flag.Parse()
 }
 
@@ -298,7 +302,12 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 	}
 
 	var watcher *bucket.InboxWatcher
-	if kafkaBootstrap != "" {
+	if batch {
+		if kafkaBootstrap != "" {
+			zap.L().Fatal("batch and kafka mode cannot be combined")
+		}
+		logger.Info("Batch mode enabled, no listener will be created")
+	} else if kafkaBootstrap != "" {
 		logger.Info("Starting kafka bucket notifications listener")
 		config := &kafka.KafkaConsumerConfig{
 			Logger:        logger,
@@ -350,6 +359,10 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 			logger.Fatal("List object error", zap.Error(object.Err))
 		}
 		handleExistingItem(object)
+	}
+
+	if batch {
+		return nil
 	}
 
 	for notificationInfo := range watcher.Uploads {
@@ -423,7 +436,7 @@ func main() {
 		if err != nil {
 			// Do we need backoff here? Maybe not while we're so specific about which error that triggers re-run.
 			logger.Info("Re-running handler", zap.Error(err))
-		} else {
+		} else if !batch {
 			logger.Fatal("Unexpectedly exited without an error")
 		}
 	}
