@@ -1,7 +1,18 @@
-#!/bin/sh
-set -e
+#!/bin/bash
+set -eEo pipefail
 
 [ "$TESTS_DISABLED" = "true" ] && echo "Tests disabled through env TESTS_DISABLED=true" && exit 0
+
+function onerr {
+  after-all.sh
+}
+
+trap onerr ERR
+
+# If we tweak kafka client config we can probably be faster
+[ -n "$ACCEPTABLE_TRANSFER_DELAY" ] || export ACCEPTABLE_TRANSFER_DELAY=1
+echo "Note: Tests rely on an arbitrary delay, ${ACCEPTABLE_TRANSFER_DELAY}s"
+echo "If existence checks fail, try increasing with ACCEPTABLE_TRANSFER_DELAY="
 
 sleep 1
 
@@ -20,3 +31,5 @@ filename-encoding.sh
 upload-path-tracking.sh
 
 echo "_____ all tests executed _____"
+after-all.sh
+echo "_____         ok         _____"

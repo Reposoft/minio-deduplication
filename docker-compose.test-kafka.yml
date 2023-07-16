@@ -1,0 +1,53 @@
+version: '2.4'
+services:
+  # Overrides for docker-compose.test.yml
+
+  kafka:
+    image: &redpanda vectorized/redpanda:v22.3.10@sha256:dc1f47dcc592857ea7831e2a28829ebca95a9cd350d6e6374a98414866b62c6f
+    entrypoint:
+    - /usr/bin/rpk
+    - redpanda
+    - start
+    - --overprovisioned
+    - --smp=1
+    - --memory=1G
+    - --reserve-memory=0M
+    - --check=false
+    - --node-id=0
+    - --kafka-addr=PLAINTEXT://kafka:9092
+    - --advertise-kafka-addr=PLAINTEXT://kafka:9092
+    - --default-log-level=warn
+    - --logger-log-level=storage=info
+
+  kafka-topic-client:
+    image: *redpanda
+    links:
+    - kafka
+    entrypoint:
+    - /bin/bash
+    - -cex
+    - |
+      until rpk cluster --brokers kafka:9092 info; do sleep 1; done;
+      rpk topic --brokers kafka:9092 create $$TOPIC_NAME
+    environment:
+      TOPIC_NAME: &topicname "minio-events"
+
+  minio0:
+    links:
+    - kafka
+    depends_on:
+    - kafka-topic-client
+    environment:
+      MINIO_NOTIFY_KAFKA_ENABLE: "on"
+      MINIO_NOTIFY_KAFKA_BROKERS: &bootstrap kafka:9092
+      MINIO_NOTIFY_KAFKA_TOPIC: *topicname
+
+  app0:
+    depends_on:
+    - minio0
+    - kafka
+    environment:
+      KAFKA_BOOTSTRAP: *bootstrap
+      KAFKA_TOPIC: *topicname
+      KAFKA_CONSUMER_GROUP: "app0"
+      KAFKA_FETCH_MAX_WAIT: 500ms

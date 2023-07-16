@@ -1,5 +1,5 @@
-#!/bin/sh
-set -e
+#!/bin/bash
+set -eo pipefail
 [ -z "$DEBUG" ] || set -x
 
 # https://github.com/minio/minio/pull/8754

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/minio/minio-go/v7/pkg/notification"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -23,6 +25,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"repos.se/minio-deduplication/v2/pkg/bucket"
+	"repos.se/minio-deduplication/v2/pkg/kafka"
 	"repos.se/minio-deduplication/v2/pkg/metadata"
 )
 
@@ -40,6 +44,12 @@ var (
 	secretkey               string
 	metrics                 string
 	trace                   bool
+	kafkaBootstrap          = os.Getenv("KAFKA_BOOTSTRAP")
+	kafkaTopic              = os.Getenv("KAFKA_TOPIC")
+	kafkaConsumerGroup      = os.Getenv("KAFKA_CONSUMER_GROUP")
+	kafkaFetchMaxWait       = os.Getenv("KAFKA_FETCH_MAX_WAIT")
+	kafkaFetchMaxWaiDefault = time.Duration(time.Second * 1) // Default is 5 s which will keep users waiting quite a bit, https://github.com/twmb/franz-go/blob/v1.11.0/pkg/kgo/config.go#L1096
+
 	ignoredUnexpectedBucket = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "blobs_ignored_unexpected_bucket",
 		Help: "The number of notifications ignored because the bucket didn't match the requested name",
@@ -73,6 +83,24 @@ func init() {
 	flag.Parse()
 }
 
+func getConsumerGroupName(logger *zap.Logger) string {
+	if kafkaConsumerGroup != "" {
+		return kafkaConsumerGroup
+	}
+	namespace := os.Getenv("POD_NAMESPACE")
+	if namespace != "" {
+		name := fmt.Sprintf("minio-deduplication.%s", namespace)
+		logger.Info("Consumer group name not configured, used namespace to guess", zap.String("name", name))
+		return name
+	}
+	host := os.Getenv("HOST")
+	if host == "" {
+		logger.Fatal("Consumer group required but not set, and no HOST env")
+	}
+	logger.Info("Consumer group name not configured, used hostname to guess", zap.String("name", host))
+	return host
+}
+
 func assertBucketExists(ctx context.Context, name string, minioClient *minio.Client, logger *zap.Logger) {
 	check := func() error {
 		found, err := minioClient.BucketExists(ctx, name)
@@ -102,6 +130,10 @@ func assertBucketExists(ctx context.Context, name string, minioClient *minio.Cli
 func transfer(ctx context.Context, blob uploaded, minioClient *minio.Client, logger *zap.Logger) {
 	objectInfo, err := minioClient.StatObject(ctx, inbox, blob.Key, minio.StatObjectOptions{})
 	if err != nil {
+		// NOTE with kafka notifications we currently use the default commit behavior
+		// https://github.com/twmb/franz-go/blob/master/docs/producing-and-consuming.md#consumer-groups
+		// which means that it's likely after unclean exit that transfers happend but commit did not.
+		// The risk would be present but lower with commit immediately upon transfer.
 		logger.Fatal("Failed to stat source object",
 			zap.String("key", blob.Key),
 			zap.String("bucket", inbox),
@@ -246,14 +278,68 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 		minioClient.TraceOn(os.Stderr)
 	}
 
-	assertBucketExists(ctx, inbox, minioClient, logger)
-	assertBucketExists(ctx, archive, minioClient, logger)
-	logger.Info("Bucket existence confirmed", zap.String("inbox", inbox), zap.String("archive", archive))
+	// These variables predate the InboxWatcher interface, and should probably be incorporated there:
+	// - When to wait for bucket existence
+	waitForBucketExistence := func() {
+		assertBucketExists(ctx, inbox, minioClient, logger)
+		assertBucketExists(ctx, archive, minioClient, logger)
+		logger.Info("Bucket existence confirmed", zap.String("inbox", inbox), zap.String("archive", archive))
+	}
+	// - Whether to url decode keys
+	urldecodeKeys := false
+	// - What to do with existing items
+	handleExistingItem := func(object minio.ObjectInfo) {
+		logger.Info("Existing inbox object to be transferred", zap.String("key", object.Key))
+		transfersStarted.With(prometheus.Labels{"trigger": "listing"}).Inc()
+		transfer(ctx, uploaded{
+			Key: object.Key,
+			Ext: toExtension(object.Key),
+		}, minioClient, logger)
+	}
 
-	logger.Info("Starting bucket notifications listener")
-	listenCh := minioClient.ListenBucketNotification(ctx, inbox, "", "", []string{
-		"s3:ObjectCreated:*",
-	})
+	var watcher *bucket.InboxWatcher
+	if kafkaBootstrap != "" {
+		logger.Info("Starting kafka bucket notifications listener")
+		config := &kafka.KafkaConsumerConfig{
+			Logger:        logger,
+			Bootstrap:     strings.Split(kafkaBootstrap, ","),
+			Topics:        []string{kafkaTopic},
+			ConsumerGroup: getConsumerGroupName(logger),
+			Filter: kafka.MessageFilter{
+				KeyPrefix: fmt.Sprintf("%s/", inbox),
+			},
+			FetchMaxWait: kafkaFetchMaxWaiDefault,
+		}
+		if kafkaFetchMaxWait != "" {
+			config.FetchMaxWait, err = time.ParseDuration(kafkaFetchMaxWait)
+			if err != nil {
+				logger.Fatal("Failed to parse FetchMaxWait config", zap.String("value", kafkaFetchMaxWait))
+			}
+		}
+		watcher = kafka.NewKafka(ctx, config)
+		waitForBucketExistence()
+		urldecodeKeys = true // https://github.com/minio/minio/issues/7665#issuecomment-493681445
+		handleExistingItem = func(object minio.ObjectInfo) {
+			logger.Warn("Existing ignored; consumer offsets should track prior uploads",
+				zap.String("key", object.Key),
+			)
+		}
+	} else {
+		waitForBucketExistence()
+		logger.Info("Starting standalone bucket notifications listener")
+		watcher = &bucket.InboxWatcher{
+			Uploads: minioClient.ListenBucketNotification(ctx, inbox, "", "", []string{
+				"s3:ObjectCreated:Put",
+			}),
+			Ack: func(ackctx context.Context, tr bucket.TransferResult, i *notification.Info) {
+				if tr == bucket.TransferFailed {
+					logger.Error("Nack on transfer failure not implemented")
+				} else {
+					logger.Debug("Ack is a no-op for ListenBucketNotification")
+				}
+			},
+		}
+	}
 
 	logger.Info("Listing existing inbox objects")
 	objectCh := minioClient.ListObjects(ctx, inbox, minio.ListObjectsOptions{
@@ -263,15 +349,10 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 		if object.Err != nil {
 			logger.Fatal("List object error", zap.Error(object.Err))
 		}
-		logger.Info("Existing inbox object to be transferred", zap.String("key", object.Key))
-		transfersStarted.With(prometheus.Labels{"trigger": "listing"}).Inc()
-		transfer(ctx, uploaded{
-			Key: object.Key,
-			Ext: toExtension(object.Key),
-		}, minioClient, logger)
+		handleExistingItem(object)
 	}
 
-	for notificationInfo := range listenCh {
+	for notificationInfo := range watcher.Uploads {
 		if notificationInfo.Err != nil {
 			// Can't test these failure modes with the current build infra, but we fall back to crashlooping if detection fails.
 			// If we get errors without any successful notifications we'll transfer files anyway, per the ListObjects above.
@@ -288,13 +369,21 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 			)
 		}
 		for _, record := range notificationInfo.Records {
-			logger.Info("Notification",
-				zap.Any("record", record),
-			)
 			key := record.S3.Object.Key
-			if record.S3.Bucket.Name != inbox {
+			if urldecodeKeys {
+				key, err = url.QueryUnescape(key)
+				if err != nil {
+					logger.Fatal("Url decoding failed", zap.String("key", key), zap.Error(err))
+				}
+			}
+			bucketName := record.S3.Bucket.Name
+			logger.Info("Notification record",
+				zap.String("bucket", bucketName),
+				zap.String("key", key),
+			)
+			if bucketName != inbox {
 				logger.Error("Unexpected notification bucket. Ignoring.",
-					zap.String("name", record.S3.Bucket.Name),
+					zap.String("name", bucketName),
 					zap.String("expected", inbox))
 				ignoredUnexpectedBucket.Inc()
 				continue
@@ -304,6 +393,8 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 				Key: key,
 				Ext: toExtension(key),
 			}, minioClient, logger)
+			// transfer is sync and errors are fatal so we can ack here
+			watcher.Ack(ctx, bucket.TransferOk, &notificationInfo)
 		}
 	}
 

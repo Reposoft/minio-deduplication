@@ -1,5 +1,5 @@
-#!/bin/sh
-set -e
+#!/bin/bash
+set -eo pipefail
 [ -z "$DEBUG" ] || set -x
 
 name="party.svg"
@@ -36,6 +36,6 @@ curl -f -v --retry 3 -T "$name" \
 
 hash=$(sha256sum "$name" | cut -d' ' -f1)
 dir=${hash:0:2}/${hash:2:2}/
-sleep 1
+sleep $ACCEPTABLE_TRANSFER_DELAY
 curl -f -v --retry 3 -I http://minio0:9000/bucket.read/$dir$hash.svg | tee "$name.3.headers"
 cat "$name.3.headers" | grep 'x-amz-meta-revision: My Revised'

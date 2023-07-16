@@ -2,10 +2,12 @@ version: '2.4'
 services:
 
   minio0:
-    image: docker.io/minio/minio:RELEASE.2023-01-02T09-40-09Z
+    image: docker.io/minio/minio:RELEASE.2023-07-11T21-29-34Z
     command:
     - server
     - /data
+    environment:
+      MINIO_PROMETHEUS_AUTH_TYPE: public
     expose:
     - 9000
     mem_limit: 60000000
@@ -35,6 +37,7 @@ services:
     environment:
     - DEBUG=true
     - TESTS_DISABLED=${TESTS_DISABLED:-true}
+    - ACCEPTABLE_TRANSFER_DELAY=${ACCEPTABLE_TRANSFER_DELAY:-3}
     - MINIO_ACCESS_KEY=minioadmin
     - MINIO_SECRET_KEY=minioadmin
     entrypoint:
