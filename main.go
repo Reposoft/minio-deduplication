@@ -419,11 +419,24 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 	return nil
 }
 
-func metricsIntercept(handler http.Handler, callback func()) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+type OnHttp struct {
+	handler   http.Handler
+	callbacks []func()
+}
+
+func NewOnHttp(handler http.Handler) *OnHttp {
+	o := &OnHttp{}
+	o.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handler.ServeHTTP(w, r)
-		callback()
+		for _, c := range o.callbacks {
+			c()
+		}
 	})
+	return o
+}
+
+func (o *OnHttp) AddCallbackAfterResponse(callback func()) {
+	o.callbacks = append(o.callbacks, callback)
 }
 
 func main() {
@@ -433,20 +446,11 @@ func main() {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
-	metricsHandler := promhttp.Handler()
-	batchmetricsExit := false
-	if batchmetrics {
-		if !batch {
-			logger.Fatal("batchmetrics without batch")
-		}
-		metricsHandler = metricsIntercept(metricsHandler, func() {
-			if batchmetricsExit {
-				logger.Info("Exiting on batch mode final metrics scrape")
-				os.Exit(0)
-			}
-		})
+	onMetrics := NewOnHttp(promhttp.Handler())
+	if batchmetrics && !batch {
+		logger.Fatal("batchmetrics without batch")
 	}
-	http.Handle("/metrics", metricsHandler)
+	http.Handle("/metrics", onMetrics.handler)
 	go func() {
 		logger.Info("Starting /metrics server", zap.String("bound", metrics))
 		err := http.ListenAndServe(metrics, nil)
@@ -466,9 +470,19 @@ func main() {
 		} else if batch {
 			logger.Info("Batch mode completed")
 			if batchmetrics {
-				logger.Info("Awaiting next metrics scrape before exit", zap.Duration("max", batchmetricsWaitMax))
-				batchmetricsExit = true
-				time.Sleep(batchmetricsWaitMax)
+				done := false
+				onMetrics.AddCallbackAfterResponse(func() {
+					done = true
+				})
+				for start := time.Now(); time.Since(start) < batchmetricsWaitMax; {
+					time.Sleep(time.Duration(time.Millisecond * 100))
+					if done {
+						logger.Info("Exiting on batch mode final metrics scrape")
+						os.Exit(0)
+					}
+				}
+				logger.Error("Failed to detect a metrics scrape", zap.Duration("within", batchmetricsWaitMax))
+				os.Exit(2)
 			}
 			os.Exit(0)
 		} else {
