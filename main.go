@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"repos.se/minio-deduplication/v2/pkg/bucket"
+	"repos.se/minio-deduplication/v2/pkg/index"
 	"repos.se/minio-deduplication/v2/pkg/kafka"
 	"repos.se/minio-deduplication/v2/pkg/metadata"
 )
@@ -48,6 +49,10 @@ var (
 	batchmetrics            bool
 	batchmetricsWaitMax     = time.Duration(time.Minute * 1)
 	restartDelay            time.Duration
+	indexNext               *index.Index
+	indexWrite              bool
+	indexWriteDir           = "deduplication-index"
+	indexType               = "application/jsonlines"
 	kafkaBootstrap          = os.Getenv("KAFKA_BOOTSTRAP")
 	kafkaTopic              = os.Getenv("KAFKA_TOPIC")
 	kafkaConsumerGroup      = os.Getenv("KAFKA_CONSUMER_GROUP")
@@ -87,6 +92,7 @@ func init() {
 	flag.BoolVar(&batch, "batch", false, "Run in batch mode: list + transfer then exit")
 	flag.BoolVar(&batchmetrics, "batchmetrics", false, "Wait for metrics scrape after batch run")
 	flag.DurationVar(&restartDelay, "restartdelay", time.Duration(time.Second*1), "On error restart after sleep, zero to disable restart")
+	flag.BoolVar(&indexWrite, "index", false, "Write index files to archive /minio-deduplication-index/*")
 	flag.Parse()
 }
 
@@ -231,6 +237,13 @@ func transfer(ctx context.Context, blob uploaded, minioClient *minio.Client, log
 		zap.String("key", uploadInfo.Key),
 		zap.String("etag", uploadInfo.ETag),
 	)
+	indexNext.AppendTransfer(
+		blob.Key,
+		uploadInfo,
+		existing.Key != "",
+		meta,
+	)
+
 	// This check for destination existence is just a safeguard, because we don't get a lot of feedback from CopyObject
 	// Should we check that metadata was transferred too?
 	existing, confirmErr := minioClient.StatObject(ctx, archive, blobName, minio.StatObjectOptions{})
@@ -366,6 +379,18 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 	}
 
 	if batch {
+		if indexWrite {
+			indexKey := fmt.Sprintf("%s/%s",
+				indexWriteDir,
+				time.Now().UTC().Format("2006-01-02t150405.jsonlines"),
+			)
+			indexBody, indexBytes, err := indexNext.Serialize(indexType)
+			if err != nil {
+				logger.Fatal("Failed to get index serializer", zap.Error(err))
+			}
+			minioClient.PutObject(ctx, archive, indexKey, indexBody, indexBytes, minio.PutObjectOptions{})
+			logger.Info("Wrote index", zap.String("key", indexKey), zap.Int64("size", indexBytes))
+		}
 		return nil
 	}
 
@@ -458,6 +483,11 @@ func main() {
 			logger.Fatal("Failed to start metrics server", zap.Error(err))
 		}
 	}()
+
+	indexNext = index.New()
+	if indexWrite && !batch {
+		logger.Fatal("index only allowed in batch mode, TBD when to serialize in watch mode")
+	}
 
 	for {
 		err := mainMinio(ctx, logger)

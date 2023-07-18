@@ -13,6 +13,7 @@ services:
     - --archive=bucket.read
     - --batch
     - --batchmetrics
+    - --index
 
   sut:
     entrypoint:
