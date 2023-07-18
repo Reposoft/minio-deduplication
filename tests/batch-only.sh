@@ -43,10 +43,16 @@ until mc --no-color stat "$expected"; \
   do [ $(( retrywait++ )) -lt $RETRIES ]; sleep $ACCEPTABLE_TRANSFER_DELAY; done
 mc --no-color stat --json "$expected" | grep '"Content-Type":"text/testing1"'
 
-mc --no-color ls minio0/bucket.write
-mc --no-color ls minio0/bucket.read
+mc --no-color ls --summarize minio0/bucket.write | grep 'Total Objects: 0'
+mc --no-color ls --summarize minio0/bucket.read | grep 'Total Objects: 2'
 
-curl -s http://app0:2112/metrics | tee metrics.txt | grep blobs_
+# We check the index in after-all.sh but we can only scrape once (but actually we might need to add a dealy anyway to allow for replicated prometheus)
+# curl -s http://app0:2112/metrics | tee metrics.txt | grep blobs_
+
+index=$(mc --no-color ls minio0/bucket.read/deduplication-index | awk '{print $NF}')
+
+echo "_____ index contents _____"
+mc cat minio0/bucket.read/deduplication-index/$index
 
 echo "_____ batch test executed _____"
 after-all.sh

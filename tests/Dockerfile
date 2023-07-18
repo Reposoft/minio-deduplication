@@ -1,6 +1,6 @@
-FROM --platform=${TARGETPLATFORM:-linux/amd64} vectorized/redpanda:v22.3.10@sha256:dc1f47dcc592857ea7831e2a28829ebca95a9cd350d6e6374a98414866b62c6f
+FROM --platform=${TARGETPLATFORM:-linux/amd64} redpandadata/redpanda:v23.1.13@sha256:5cca0f6ab9f6f932f443182d5587d835d23f6c66ad85127cfe2ccd2c237ff222
 
-FROM --platform=${TARGETPLATFORM:-linux/amd64} minio/mc:RELEASE.2022-12-24T15-21-38Z
+FROM --platform=${TARGETPLATFORM:-linux/amd64} minio/mc:RELEASE.2023-07-11T23-30-44Z
 
 RUN microdnf install jq --nodocs
 
