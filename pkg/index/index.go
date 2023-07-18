@@ -20,8 +20,6 @@ type IndexEntry struct {
 	Replaced bool `json:"replaced"`
 	// Metareplaced is true if meta was updated, false if unchanged or new
 	Metareplaced bool `json:"metareplaced"`
-	// Size is the size in bytes
-	Size int64 `json:"size"`
 	// Etag is the upload etag
 	Etag string `json:"etag"`
 	// Meta is the metadata written
@@ -41,13 +39,13 @@ func (i *Index) Append(entry IndexEntry) {
 }
 
 func (i *Index) AppendTransfer(uploadKey string, dstInfo minio.UploadInfo, replaced bool, meta *metadata.MetadataNext) {
+	// note that dstInfo.Size is zero because we did a copy
 	i.Append(IndexEntry{
 		IndexFormatVersion: 1,
 		Upload:             uploadKey,
 		Key:                dstInfo.Key,
 		Replaced:           replaced,
 		Metareplaced:       replaced && meta.ReplaceMetadata,
-		Size:               dstInfo.Size,
 		Etag:               dstInfo.ETag,
 		Meta:               meta.UserMetadata,
 	})
