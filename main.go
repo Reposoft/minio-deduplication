@@ -379,7 +379,7 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 	}
 
 	if batch {
-		if indexWrite {
+		if indexWrite && indexNext.Size() > 0 {
 			indexKey := fmt.Sprintf("%s/%s",
 				indexWriteDir,
 				time.Now().UTC().Format("2006-01-02t150405.jsonlines"),

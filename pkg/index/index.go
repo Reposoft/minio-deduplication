@@ -34,6 +34,10 @@ func New() *Index {
 	return &Index{}
 }
 
+func (i *Index) Size() int {
+	return len(i.entries)
+}
+
 func (i *Index) Append(entry IndexEntry) {
 	i.entries = append(i.entries, entry)
 }
