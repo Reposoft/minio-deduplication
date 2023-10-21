@@ -14,7 +14,7 @@ services:
     - --batch
     - --batchmetrics
     - --index
-    - --dropempty=true
+    - --dropempty
 
   sut:
     entrypoint:
