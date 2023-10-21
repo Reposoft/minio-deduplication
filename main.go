@@ -36,6 +36,10 @@ type uploaded struct {
 	Ext string
 }
 
+const (
+	emptyFileSha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+)
+
 var (
 	inbox                   string
 	archive                 string
@@ -49,6 +53,7 @@ var (
 	batchmetrics            bool
 	batchmetricsWaitMax     = time.Duration(time.Minute * 1)
 	restartDelay            time.Duration
+	dropEmptyFiles          bool
 	indexNext               *index.Index
 	indexWrite              bool
 	indexWriteDir           = "deduplication-index"
@@ -93,6 +98,7 @@ func init() {
 	flag.BoolVar(&batchmetrics, "batchmetrics", false, "Wait for metrics scrape after batch run")
 	flag.DurationVar(&restartDelay, "restartdelay", time.Duration(time.Second*1), "On error restart after sleep, zero to disable restart")
 	flag.BoolVar(&indexWrite, "index", false, "Write index files to archive /minio-deduplication-index/*")
+	flag.BoolVar(&dropEmptyFiles, "dropempty", false, "Drops empty files (deletes them from inbox)")
 	flag.Parse()
 }
 
@@ -173,6 +179,20 @@ func transfer(ctx context.Context, blob uploaded, minioClient *minio.Client, log
 	}
 	sha256hex := fmt.Sprintf("%x", hasher.Sum(nil))
 	logger.Debug("SHA256", zap.String("hex", sha256hex))
+
+	if dropEmptyFiles && sha256hex == emptyFileSha256 {
+		cleanupErr := minioClient.RemoveObject(ctx, inbox, blob.Key, minio.RemoveObjectOptions{})
+		if cleanupErr != nil {
+			logger.Fatal("Failed to remove empty file. Inbox item probably still exists.",
+				zap.String("key", blob.Key),
+				zap.String("bucket", inbox),
+				zap.Error(err),
+			)
+		}
+		logger.Info("Dropped empty file", zap.String("key", blob.Key))
+		return
+	}
+
 	write := fmt.Sprintf("%s/%s%s", archive, sha256hex, blob.Ext)
 	logger.Info("Transferring",
 		zap.String("key", blob.Key),

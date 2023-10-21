@@ -33,6 +33,7 @@ tagging.sh
 zero-padded-checksums.sh
 filename-encoding.sh
 upload-path-tracking.sh
+drop-empty.sh
 
 echo "_____ all tests executed _____"
 after-all.sh

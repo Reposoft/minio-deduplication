@@ -30,6 +30,7 @@ services:
     - --secretkey=minioadmin
     - --inbox=bucket.write
     - --archive=bucket.read
+    - --dropempty=true
     #- --trace=true
     deploy:
       resources:
