@@ -32,6 +32,8 @@ mc event add minio0/bucket.write arn:minio:sqs::_:kafka --event put || \
 echo "Added before watch" > test1.txt
 mc --no-color cp --attr "Content-Type=text/testing1" test1.txt minio0/bucket.write/
 mc --no-color stat --json minio0/bucket.write/test1.txt | grep '"Content-Type":"text/testing1"'
+touch empty-file3.txt
+mc --no-color cp empty-file3.txt minio0/bucket.write/original/dir/empty-file3.txt
 
 mc --no-color mb minio0/bucket.read
 
@@ -50,9 +52,11 @@ mc --no-color ls --summarize minio0/bucket.read | grep 'Total Objects: 2'
 # curl -s http://app0:2112/metrics | tee metrics.txt | grep blobs_
 
 index=$(mc --no-color ls minio0/bucket.read/deduplication-index | awk '{print $NF}')
+indexcopy=$(mktemp)
 
 echo "_____ index contents _____"
-mc cat minio0/bucket.read/deduplication-index/$index
+mc cat minio0/bucket.read/deduplication-index/$index | tee $indexcopy
+grep empty-file3.txt $indexcopy >/dev/null
 
 echo "_____ batch test executed _____"
 after-all.sh
