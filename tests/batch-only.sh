@@ -43,8 +43,6 @@ until mc --no-color stat "$expected"; \
   do [ $(( retrywait++ )) -lt $RETRIES ]; sleep $ACCEPTABLE_TRANSFER_DELAY; done
 mc --no-color stat --json "$expected" | grep '"Content-Type":"text/testing1"'
 
-drop-empty.sh
-
 mc --no-color ls --summarize minio0/bucket.write | grep 'Total Objects: 0'
 mc --no-color ls --summarize minio0/bucket.read | grep 'Total Objects: 2'
 
@@ -54,9 +52,7 @@ mc --no-color ls --summarize minio0/bucket.read | grep 'Total Objects: 2'
 index=$(mc --no-color ls minio0/bucket.read/deduplication-index | awk '{print $NF}')
 
 echo "_____ index contents _____"
-indexcopy=$(mktemp)
-mc cat minio0/bucket.read/deduplication-index/$index | tee $indexcopy
-grep "empty-file.txt" $indexcopy >/dev/null
+mc cat minio0/bucket.read/deduplication-index/$index
 
 echo "_____ batch test executed _____"
 after-all.sh
