@@ -190,6 +190,7 @@ func transfer(ctx context.Context, blob uploaded, minioClient *minio.Client, log
 			)
 		}
 		logger.Info("Dropped empty file", zap.String("key", blob.Key))
+		indexNext.AppendDrop(blob.Key)
 		return
 	}
 

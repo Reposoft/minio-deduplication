@@ -14,7 +14,7 @@ type IndexEntry struct {
 	IndexFormatVersion int8 `json:"v"`
 	// Upload is the original uploadPath
 	Upload string `json:"upload"`
-	// Key is the blob key for read access
+	// Key is the blob key for read access, empty string on drop (see --dropempty)
 	Key string `json:"key"`
 	// Replaced is true if the target existed (i.e. identical body), false if new
 	Replaced bool `json:"replaced"`
@@ -52,6 +52,18 @@ func (i *Index) AppendTransfer(uploadKey string, dstInfo minio.UploadInfo, repla
 		Metareplaced:       replaced && meta.ReplaceMetadata,
 		Etag:               dstInfo.ETag,
 		Meta:               meta.UserMetadata,
+	})
+}
+
+func (i *Index) AppendDrop(uploadKey string) {
+	i.Append(IndexEntry{
+		IndexFormatVersion: 1,
+		Upload:             uploadKey,
+		Key:                "",
+		Replaced:           false,
+		Metareplaced:       false,
+		Etag:               "",
+		Meta:               nil,
 	})
 }
 
