@@ -10,6 +10,7 @@ echo "DOCKER_DEFAULT_PLATFORM=$DOCKER_DEFAULT_PLATFORM"
 for TEST in \
     "-f docker-compose.test.yml" \
     "-f docker-compose.test.yml -f docker-compose.test-kafka.yml" \
+    "-f docker-compose.test.yml -f docker-compose.test-batch.yml" \
     ; do
   echo "=> $TEST"
   TESTS_DISABLED=false docker-compose $TEST up --build --abort-on-container-exit --exit-code-from sut sut

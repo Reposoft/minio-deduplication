@@ -1,9 +1,10 @@
-version: '2.4'
+# yaml-language-server: $schema=https://raw.githubusercontent.com/docker/cli/v24.0.4/cli/compose/schema/data/config_schema_v3.9.json
+version: '3.9'
 services:
   # Overrides for docker-compose.test.yml
 
   kafka:
-    image: &redpanda vectorized/redpanda:v22.3.10@sha256:dc1f47dcc592857ea7831e2a28829ebca95a9cd350d6e6374a98414866b62c6f
+    image: &redpanda redpandadata/redpanda:v23.2.12@sha256:cd4d56c5859216698dd7083d4f9f1dcaebdbf0a6453f6972520a52f70c2a3f09
     entrypoint:
     - /usr/bin/rpk
     - redpanda

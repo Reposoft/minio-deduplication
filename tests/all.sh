@@ -4,10 +4,14 @@ set -eEo pipefail
 [ "$TESTS_DISABLED" = "true" ] && echo "Tests disabled through env TESTS_DISABLED=true" && exit 0
 
 function onerr {
-  after-all.sh
+  CALLER="$(caller)"
+  LINE=$1
+  echo "^^^^^ ERR $CALLER line $LINE ^^^^^"
+  after-all.sh || true
+  echo "_____ ERR $CALLER line $LINE _____"
 }
 
-trap onerr ERR
+trap 'onerr $LINENO' ERR
 
 # If we tweak kafka client config we can probably be faster
 [ -n "$ACCEPTABLE_TRANSFER_DELAY" ] || export ACCEPTABLE_TRANSFER_DELAY=1
@@ -29,6 +33,7 @@ tagging.sh
 zero-padded-checksums.sh
 filename-encoding.sh
 upload-path-tracking.sh
+drop-empty.sh
 
 echo "_____ all tests executed _____"
 after-all.sh

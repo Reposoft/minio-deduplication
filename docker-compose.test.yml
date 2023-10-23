@@ -1,8 +1,9 @@
-version: '2.4'
+# yaml-language-server: $schema=https://raw.githubusercontent.com/docker/cli/v24.0.4/cli/compose/schema/data/config_schema_v3.9.json
+version: '3.9'
 services:
 
   minio0:
-    image: docker.io/minio/minio:RELEASE.2023-07-11T21-29-34Z
+    image: docker.io/minio/minio:RELEASE.2023-10-16T04-13-43Z
     command:
     - server
     - /data
@@ -10,7 +11,10 @@ services:
       MINIO_PROMETHEUS_AUTH_TYPE: public
     expose:
     - 9000
-    mem_limit: 60000000
+    deploy:
+      resources:
+        limits:
+          memory: 60M
 
   app0:
     depends_on:
@@ -26,8 +30,12 @@ services:
     - --secretkey=minioadmin
     - --inbox=bucket.write
     - --archive=bucket.read
+    - --dropempty
     #- --trace=true
-    mem_limit: 20000000
+    deploy:
+      resources:
+        limits:
+          memory: 20M
 
   sut:
     depends_on:
