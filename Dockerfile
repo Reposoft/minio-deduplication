@@ -1,4 +1,4 @@
-FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.21.3-bookworm
+FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.23.8-bookworm
 
 WORKDIR /workspace/source
 
