@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/docker/cli/v24.0.4/cli/compose/schema/data/config_schema_v3.9.json
+version: '3.9'
+services:
+  # Overrides for docker-compose.test.yml
+
+  app0:
+    command:
+    - --host=minio0:9000
+    - --secure=false
+    - --accesskey=minioadmin
+    - --secretkey=minioadmin
+    - --inbox=bucket.write
+    - --archive=bucket.read
+    - --batch
+    - --batchmetrics
+    - --index
+    - --dropempty
+
+  sut:
+    entrypoint:
+    - batch-only.sh

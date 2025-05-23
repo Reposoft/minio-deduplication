@@ -1,4 +1,4 @@
-FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.20.6-bullseye
+FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.21.3-bookworm
 
 WORKDIR /workspace/source
 
@@ -16,7 +16,7 @@ RUN GOOS=$TARGETOS GOARCH=$TARGETARCH \
   CGO_ENABLED=0 \
   go build -ldflags '-w -extldflags "-static"'
 
-FROM --platform=${TARGETPLATFORM:-linux/amd64} gcr.io/distroless/static-debian11:nonroot
+FROM --platform=${TARGETPLATFORM:-linux/amd64} gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=0 /workspace/source/minio-deduplication /usr/local/bin/minio-deduplication
 

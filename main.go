@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"repos.se/minio-deduplication/v2/pkg/bucket"
+	"repos.se/minio-deduplication/v2/pkg/index"
 	"repos.se/minio-deduplication/v2/pkg/kafka"
 	"repos.se/minio-deduplication/v2/pkg/metadata"
 )
@@ -34,6 +35,10 @@ type uploaded struct {
 	Key string
 	Ext string
 }
+
+const (
+	emptyFileSha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+)
 
 var (
 	inbox                   string
@@ -44,6 +49,15 @@ var (
 	secretkey               string
 	metrics                 string
 	trace                   bool
+	batch                   bool
+	batchmetrics            bool
+	batchmetricsWaitMax     = time.Duration(time.Minute * 1)
+	restartDelay            time.Duration
+	dropEmptyFiles          bool
+	indexNext               *index.Index
+	indexWrite              bool
+	indexWriteDir           = "deduplication-index"
+	indexType               = "application/jsonlines"
 	kafkaBootstrap          = os.Getenv("KAFKA_BOOTSTRAP")
 	kafkaTopic              = os.Getenv("KAFKA_TOPIC")
 	kafkaConsumerGroup      = os.Getenv("KAFKA_CONSUMER_GROUP")
@@ -80,6 +94,11 @@ func init() {
 	flag.StringVar(&secretkey, "secretkey", "", "secret key")
 	flag.StringVar(&metrics, "metrics", ":2112", "bind metrics server to")
 	flag.BoolVar(&trace, "trace", false, "Enable minio client tracing")
+	flag.BoolVar(&batch, "batch", false, "Run in batch mode: list + transfer then exit")
+	flag.BoolVar(&batchmetrics, "batchmetrics", false, "Wait for metrics scrape after batch run")
+	flag.DurationVar(&restartDelay, "restartdelay", time.Duration(time.Second*1), "On error restart after sleep, zero to disable restart")
+	flag.BoolVar(&indexWrite, "index", false, "Write index files to archive /minio-deduplication-index/*")
+	flag.BoolVar(&dropEmptyFiles, "dropempty", false, "Drops empty files (deletes them from inbox)")
 	flag.Parse()
 }
 
@@ -160,6 +179,21 @@ func transfer(ctx context.Context, blob uploaded, minioClient *minio.Client, log
 	}
 	sha256hex := fmt.Sprintf("%x", hasher.Sum(nil))
 	logger.Debug("SHA256", zap.String("hex", sha256hex))
+
+	if dropEmptyFiles && sha256hex == emptyFileSha256 {
+		cleanupErr := minioClient.RemoveObject(ctx, inbox, blob.Key, minio.RemoveObjectOptions{})
+		if cleanupErr != nil {
+			logger.Fatal("Failed to remove empty file. Inbox item probably still exists.",
+				zap.String("key", blob.Key),
+				zap.String("bucket", inbox),
+				zap.Error(err),
+			)
+		}
+		logger.Info("Dropped empty file", zap.String("key", blob.Key))
+		indexNext.AppendDrop(blob.Key)
+		return
+	}
+
 	write := fmt.Sprintf("%s/%s%s", archive, sha256hex, blob.Ext)
 	logger.Info("Transferring",
 		zap.String("key", blob.Key),
@@ -224,6 +258,13 @@ func transfer(ctx context.Context, blob uploaded, minioClient *minio.Client, log
 		zap.String("key", uploadInfo.Key),
 		zap.String("etag", uploadInfo.ETag),
 	)
+	indexNext.AppendTransfer(
+		blob.Key,
+		uploadInfo,
+		existing.Key != "",
+		meta,
+	)
+
 	// This check for destination existence is just a safeguard, because we don't get a lot of feedback from CopyObject
 	// Should we check that metadata was transferred too?
 	existing, confirmErr := minioClient.StatObject(ctx, archive, blobName, minio.StatObjectOptions{})
@@ -298,7 +339,12 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 	}
 
 	var watcher *bucket.InboxWatcher
-	if kafkaBootstrap != "" {
+	if batch {
+		if kafkaBootstrap != "" {
+			zap.L().Fatal("batch and kafka mode cannot be combined")
+		}
+		logger.Info("Batch mode enabled, no listener will be created")
+	} else if kafkaBootstrap != "" {
 		logger.Info("Starting kafka bucket notifications listener")
 		config := &kafka.KafkaConsumerConfig{
 			Logger:        logger,
@@ -347,9 +393,26 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 	})
 	for object := range objectCh {
 		if object.Err != nil {
-			logger.Fatal("List object error", zap.Error(object.Err))
+			logger.Error("List object error", zap.Error(object.Err))
+			return object.Err
 		}
 		handleExistingItem(object)
+	}
+
+	if batch {
+		if indexWrite && indexNext.Size() > 0 {
+			indexKey := fmt.Sprintf("%s/%s",
+				indexWriteDir,
+				time.Now().UTC().Format("2006-01-02t150405.jsonlines"),
+			)
+			indexBody, indexBytes, err := indexNext.Serialize(indexType)
+			if err != nil {
+				logger.Fatal("Failed to get index serializer", zap.Error(err))
+			}
+			minioClient.PutObject(ctx, archive, indexKey, indexBody, indexBytes, minio.PutObjectOptions{})
+			logger.Info("Wrote index", zap.String("key", indexKey), zap.Int64("size", indexBytes))
+		}
+		return nil
 	}
 
 	for notificationInfo := range watcher.Uploads {
@@ -402,6 +465,26 @@ func mainMinio(ctx context.Context, logger *zap.Logger) error {
 	return nil
 }
 
+type OnHttp struct {
+	handler   http.Handler
+	callbacks []func()
+}
+
+func NewOnHttp(handler http.Handler) *OnHttp {
+	o := &OnHttp{}
+	o.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r)
+		for _, c := range o.callbacks {
+			c()
+		}
+	})
+	return o
+}
+
+func (o *OnHttp) AddCallbackAfterResponse(callback func()) {
+	o.callbacks = append(o.callbacks, callback)
+}
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -409,7 +492,11 @@ func main() {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
-	http.Handle("/metrics", promhttp.Handler())
+	onMetrics := NewOnHttp(promhttp.Handler())
+	if batchmetrics && !batch {
+		logger.Fatal("batchmetrics without batch")
+	}
+	http.Handle("/metrics", onMetrics.handler)
 	go func() {
 		logger.Info("Starting /metrics server", zap.String("bound", metrics))
 		err := http.ListenAndServe(metrics, nil)
@@ -418,11 +505,37 @@ func main() {
 		}
 	}()
 
+	indexNext = index.New()
+	if indexWrite && !batch {
+		logger.Fatal("index only allowed in batch mode, TBD when to serialize in watch mode")
+	}
+
 	for {
 		err := mainMinio(ctx, logger)
 		if err != nil {
 			// Do we need backoff here? Maybe not while we're so specific about which error that triggers re-run.
-			logger.Info("Re-running handler", zap.Error(err))
+			if restartDelay != 0 {
+				logger.Info("Re-running handler", zap.Duration("delay", restartDelay), zap.Error(err))
+				time.Sleep(restartDelay)
+			}
+		} else if batch {
+			logger.Info("Batch mode completed")
+			if batchmetrics {
+				done := false
+				onMetrics.AddCallbackAfterResponse(func() {
+					done = true
+				})
+				for start := time.Now(); time.Since(start) < batchmetricsWaitMax; {
+					time.Sleep(time.Duration(time.Millisecond * 100))
+					if done {
+						logger.Info("Exiting on batch mode final metrics scrape")
+						os.Exit(0)
+					}
+				}
+				logger.Error("Failed to detect a metrics scrape", zap.Duration("within", batchmetricsWaitMax))
+				os.Exit(2)
+			}
+			os.Exit(0)
 		} else {
 			logger.Fatal("Unexpectedly exited without an error")
 		}
