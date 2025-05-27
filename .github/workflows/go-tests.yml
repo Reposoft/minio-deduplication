@@ -1,0 +1,142 @@
+name: Go Tests
+
+on:
+  push:
+    branches: [ main, feat/gcs-serverless-port ]
+  pull_request:
+    branches: [ main, feat/gcs-serverless-port ]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Run root module unit tests
+        run: |
+          if ls *.go &>/dev/null && go list -f '{{len .TestGoFiles}}' ./... | grep -q -v '^0$'; then
+            echo "Running unit tests in root module..."
+            go test -v ./...
+          else
+            echo "No unit tests found in root module or root Go files do not exist."
+          fi
+
+      - name: Run gcs module unit tests
+        run: |
+          echo "Running unit tests in gcs module..."
+          cd gcs
+          go test -v ./...
+          cd ..
+
+  integration-tests-minio:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Start MinIO and application containers
+        run: docker-compose -f docker-compose.test.yml up -d --build app0 minio0
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for services to start..."
+          sleep 30 # Increased wait time for services to initialize
+          docker ps -a # List containers for debugging
+          echo "Checking app0 health (metrics endpoint)..."
+          curl --retry 5 --retry-delay 5 --fail http://localhost:2112/metrics
+          echo "app0 healthy."
+          echo "Checking MinIO health (mc ready)..."
+          # The mc ready check might need mc to be installed or use a different health check for MinIO from within a container or via its API.
+          # For now, relying on app0 health and sleep. A direct MinIO health check would be better.
+          # Example: docker exec <minio_container_name> /usr/bin/mc ping local --count 1 --exit
+          # This requires knowing the container name and having mc inside it or aliased.
+          # For simplicity, the curl to app0 is the primary check here.
+
+      - name: Run MinIO integration tests
+        env:
+          TEST_TARGET: minio
+          MINIO_ENDPOINT: localhost:9000
+          MINIO_ACCESS_KEY_ID: minioadmin # Standard MinIO access key from docker-compose.test.yml
+          MINIO_SECRET_ACCESS_KEY: minioadmin # Standard MinIO secret key from docker-compose.test.yml
+          WRITE_BUCKET_NAME: bucket-write # Default write bucket name in config
+          READ_BUCKET_NAME: bucket-read   # Default read bucket name in config
+          APP_METRICS_ENDPOINT: http://localhost:2112/metrics # Default metrics endpoint
+          # PRESERVED_FOLDER_DEPTH will default to 0 in config if not set
+        run: |
+          cd integration_tests/go
+          # Ensure dependencies are fetched for the test module
+          # This assumes go.mod exists in integration_tests/go
+          # If not, `go get .` might be needed or test files won't compile directly.
+          # The Go files are in a sub-module, so `go test` should handle it if go.mod is present.
+          # For now, assuming `go test` with build tags is sufficient.
+          go test -v -tags=integration .
+          cd ../..
+
+      - name: Stop containers
+        if: always() # Ensure cleanup even if tests fail
+        run: docker-compose -f docker-compose.test.yml down
+
+  integration-tests-gcs:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    permissions:
+      contents: read
+      id-token: write # Required for Workload Identity Federation
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        id: auth
+        uses: 'google-github-actions/auth@v2'
+        with:
+          workload_identity_provider: 'projects/${{ secrets.GCP_PROJECT_ID }}/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider' # User needs to set this up
+          service_account: '${{ secrets.GCP_SA_EMAIL }}' # User needs to set this up (e.g., gha-runner@project-id.iam.gserviceaccount.com)
+
+      - name: Set up Cloud SDK (optional, for gcloud commands if needed)
+        uses: 'google-github-actions/setup-gcloud@v2'
+        # This step makes `gcloud` available in the path.
+        # Not strictly necessary if Go client libraries are used with ADC from the auth action.
+
+      - name: Run GCS integration tests
+        env:
+          TEST_TARGET: gcs
+          GCS_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCS_WRITE_BUCKET_NAME: ${{ secrets.TEST_GCS_WRITE_BUCKET }} # Renamed from TEST_GCS_WRITE_BUCKET for consistency with config.go
+          GCS_READ_BUCKET_NAME: ${{ secrets.TEST_GCS_READ_BUCKET }}   # Renamed from TEST_GCS_READ_BUCKET
+          GCS_FUNCTION_NAME: ${{ secrets.GCS_FUNCTION_NAME }}
+          GCS_FUNCTION_REGION: ${{ secrets.GCS_FUNCTION_REGION }}
+          # PRESERVED_FOLDER_DEPTH will default to 0 in config if not set
+          # GOOGLE_APPLICATION_CREDENTIALS is automatically set by google-github-actions/auth for ADC
+        run: |
+          cd integration_tests/go
+          go test -v -tags=integration .
+          cd ../..
+```
+
+A few notes on the workflow:
+-   In `integration-tests-minio`, I changed `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` to `MINIO_ACCESS_KEY_ID` and `MINIO_SECRET_ACCESS_KEY` respectively to match the env var names used in `config.go`.
+-   I also changed `TEST_MINIO_WRITE_BUCKET` and `TEST_MINIO_READ_BUCKET` to `WRITE_BUCKET_NAME` and `READ_BUCKET_NAME` for MinIO job to align with `config.go` when `TEST_TARGET=minio`.
+-   Similarly for GCS, `TEST_GCS_WRITE_BUCKET` became `GCS_WRITE_BUCKET_NAME` and `TEST_GCS_READ_BUCKET` became `GCS_READ_BUCKET_NAME` in the workflow env to match `config.go`'s expected env vars for GCS.
+-   The `APP_METRICS_URL` in the MinIO job was changed to `APP_METRICS_ENDPOINT` to match `config.go`.
+-   The `Wait for services` step in MinIO job was simplified. A more robust check for MinIO itself could be added later if needed.
+
+**2. Add Build Tag for Integration Tests**
+I will now add `//go:build integration` to the top of the specified Go files.
